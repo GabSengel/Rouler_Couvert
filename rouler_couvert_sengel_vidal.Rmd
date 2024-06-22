@@ -1,0 +1,1424 @@
+---
+title: "ROULER COUVERT"
+subtitle: "Data Mining"
+author: "Paul Vidal & Gabin Sengel"
+date: "`r Sys.Date()`"
+output: pdf_document
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{float}
+  - \usepackage{titling}
+  - \usepackage{graphicx}
+  - \usepackage{geometry}
+  - \geometry{top=1.5in,bottom=1.5in,right=1.25in,left=1.25in}
+  - \newgeometry{top=1in,bottom=1in,right=1in,left=1in} # Geometry for the rest of the document
+  - \pretitle{\vspace*{\fill}\begin{center}\Huge\bfseries}
+  - \posttitle{\end{center}}
+  - \preauthor{\Large\begin{center}}
+  - \postauthor{\end{center}}
+  - \predate{\Large\begin{center}}
+  - \postdate{\end{center}\vspace*{\fill}\newpage\restoregeometry}
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+
+
+```{r setup, include=TRUE,echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+```{r, library, cache = FALSE}
+library(tidyverse)
+library(ranger)
+library(vip)
+library(tidymodels)
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(ISLR)
+library(e1071)
+library(DT)
+library(readr)
+library(missMDA)
+library(kableExtra)
+library(modelsummary)
+library(factoextra)
+library(FactoMineR)
+library(patchwork)
+library(doSNOW)
+library(recipes)
+library(discrim)
+library(installr)
+library(pROC)
+library(kernlab)
+library(yardstick)
+library(kernlab)
+library(rpart)
+library(tictoc)
+library(rpart.plot)
+library(kknn)
+library(xgboost)
+library(doParallel)
+library(ggdark)
+library(RColorBrewer)
+```
+
+```{r fonctions, cache=TRUE}
+themeBG <- theme(
+    plot.background = element_rect(fill = "white", color = "white"), # Définit le fond du panneau en noir
+    text = element_text(color = "black"), # Change la couleur du texte en blanc
+    axis.title = element_text(color = "black"), # Change la couleur des titres des axes en blanc
+    axis.title.y = element_text(color = "black", angle = 90, vjust = 0.5),
+    axis.text = element_text(color = "black"), # Change la couleur du texte des axes en blanc
+    strip.text = element_text(color = "black"),
+    plot.margin = margin(0.3,0.3,0.3,0.3, "cm"),
+    panel.background = element_rect(fill = "white", color = "white")
+  )
+
+matrice_confusion <- function(x){
+  tab_model <- x |> conf_mat(estimate = .pred_class, truth = Response)
+  data_frame <- tab_model$table |> t() |> as.data.frame()
+  colnames(data_frame)<- c("Réalité", "Prédiction", "Observation")
+  
+plot <- data_frame |> 
+  ggplot(aes(Prédiction, Réalité, fill = Observation))+
+  geom_tile() +
+  geom_text(aes(label = Observation)) +
+  scale_fill_gradient(low = "#FF9A88", high = "#CDFF8D") +
+  labs(x = "Prédiction", y = "Réalité") +
+  theme_void() + 
+  themeBG
+
+  plot
+}
+
+
+Accuracy<- function(matrice){
+  (matrice[1,1] + matrice[2,2])/ sum(matrice) * 100
+  
+}
+
+Erreur_1 <-function(matrice){
+  matrice[1,2]/sum(matrice[1,]) * 100
+  
+}
+
+Erreur_2 <- function(matrice){
+  matrice[2,1]/sum(matrice[2,]) * 100
+  
+}
+
+Specifite <- function(matrice){
+  matrice[1,1]/sum(matrice[1,]) * 100
+  
+}
+
+Sensibilite <-function(matrice){
+  matrice[2,2]/sum(matrice[2,]) * 100
+  
+}
+
+Precision <- function(matrice){
+  matrice[2,2] / (matrice[2,2] + matrice[1,2]) * 100
+  
+}
+
+Erreur_global <- function(matrice){
+  (matrice[1,2] + matrice[2,1])/ sum(matrice) * 100
+  
+}
+
+
+mesure_perf <- c("Accuracy",
+                 "Erreur global",
+                 "Spécificité",
+                 "Erreur Type 1",
+                 "Sensibilité",
+                 "Erreur Type 2",
+                 "Précision")
+
+tableau_perf <- function(x){
+             valeur_perf<-c(round(Accuracy(x),2),
+                            round(Erreur_global(x),2),
+                            round(Specifite(x),2),
+                            round(Erreur_1(x),2),
+                            round(Sensibilite(x),2),
+                            round(Erreur_2(x),2),
+                            round(Precision(x),2))
+
+              valeur_perf_str <- sapply(valeur_perf, function(x) paste0(x, " %"))
+
+              data_for_table <- cbind(mesure_perf, valeur_perf_str) |> as.data.frame()
+              
+              colnames(data_for_table)<- c("Indicateur", "Valeur")
+
+              data_for_table %>% 
+              t() %>%
+              kable() %>%
+              kable_styling(
+              full_width = FALSE,
+              font_size = 10,
+              position = "center", 
+              bootstrap_options = c("striped", "hover"),
+              latex_options = "HOLD_position"
+              )
+}
+
+Courbe_ROC <- function(list_roc,couleur_roc,nom_roc){
+  ggroc(list_roc,alpha= 1) + 
+  geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color="white", linetype="dashed")+
+  xlab("Spécificité") +
+  ylab("Sensibilité") +
+  scale_colour_manual(values = couleur_roc,labels = nom_roc) +
+  guides(colour = guide_legend(title = "Modèle"))+
+  theme_void() +
+  themeBG
+
+}
+
+calculer_precision <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  Precision(matrice_t)
+}
+
+calculer_sensi <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  Sensibilite(matrice_t)
+}
+
+calculer_f1_score <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+
+f1_score <- function(res) {
+  matrice <-  res |> 
+    conf_mat(truth = Response, estimate = .pred_class)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+```
+
+```{r, import_data, cache = FALSE}
+data <- read_csv("train.csv")
+```
+
+```{r modif_variable}
+#changement de la variable Damage_Vehciule de character a factor 
+
+data$Vehicle_Damage <- ifelse(data$Vehicle_Damage == "Yes", 1, 0)
+
+#changement de la variable Gender
+
+data$Gender <- ifelse(data$Gender=="Male","Homme","Femme")
+
+# Modification des variables 
+
+data <- data[,-1]
+data <- data |>
+  mutate(
+    Gender = factor(Gender),
+    Age = as.integer(Age),
+    Vehicle_Age = factor(Vehicle_Age),
+    Driving_License = factor(Driving_License),
+    Region_Code = factor(Region_Code),
+    Previously_Insured = factor(Previously_Insured),
+    Vehicle_Damage = factor(Vehicle_Damage),
+    Policy_Sales_Channel = factor(Policy_Sales_Channel),
+    Response = factor(Response)
+  )
+```
+
+```{r echantiollonage 40%}
+set.seed(1)
+# Définir la nouvelle proportion souhaitée pour Response = 1
+nouvelle_prop_response_1 <- 0.40
+
+# Calculer le nombre d'individus pour chaque valeur de Response basé sur la nouvelle proportion
+n_total <- 100000  # Nombre total d'individus souhaité
+
+# Nombre d'individus avec Response = 1 dans l'échantillon basé sur la nouvelle proportion
+n_response_1 <- round(n_total * nouvelle_prop_response_1)
+
+# Nombre d'individus avec Response = 0
+n_response_0 <- n_total - n_response_1
+
+# Séparer le dataframe par Response et échantillonner séparément
+df_sampled_1 <- data %>%
+  filter(Response == 1) %>%
+  sample_n(n_response_1)
+
+df_sampled_0 <- data %>%
+  filter(Response == 0) %>%
+  sample_n(n_response_0)
+
+# Combiner les deux échantillons
+df <- bind_rows(df_sampled_1, df_sampled_0)
+```
+
+\newpage
+
+# Sommaire {.unnumbered}
+
+-   
+
+    I)  [Introduction](#introduction)
+
+    -   
+
+        1)  [Description de la base de données](#Description_bdd)
+
+    -   
+
+        2)  [Problème et solution](#Problèmes)
+
+-   
+
+    II) [Analyse descriptive](#Analyse_descriptive)
+
+    -   
+
+        1)  [Variables Qualitatives](#var_quali)
+
+    -   
+
+        2)  [Variables Quantitatives](#var_quanti)
+
+-   
+
+    III) [Présentation des modèles](#modeles)
+
+    -   
+
+        1)  [Découpage](#decoupage)
+
+    -   
+
+        2)  [LDA](#LDA)
+
+    -   
+
+        3)  [QDA](#QDA)
+
+    -   
+
+        4)  [Logit](#Logit)
+
+    -   
+
+        5)  [KNN](#KNN)
+    
+    -
+    
+        6)  [Decision Tree](#DT)
+    
+    -
+    
+        7)  [Random Forest](#RF)
+        
+    -
+    
+        8)  [Boosting](#Boosting)
+        
+-   
+
+    IV) [Comparaison des modèes](#comparer_modeles)
+    
+    - 
+    
+        1) [Courbe ROC](#ROC)
+    
+    -
+    
+        2) [F1_Score](#f1_score)
+        
+
+\newpage
+
+# Introduction {#introduction}
+
+Dans le cadre de cette étude, nous examinerons une base de données qui compile des informations sur les membres d'une compagnie d'assurance santé indienne.
+Cette entreprise envisage d'élargir son offre en introduisant des contrats d'assurance automobile destinés à ses clients actuels.
+Notre objectif est de développer le modèle le plus efficace pour prédire la probabilité qu'un client soit intéressé par un contrat d'assurance automobile. 
+
+## Description de la base de données {#Desciption_bdd}
+
+Pour ce faire, nous disposons de la base de données [**Health Insurance Cross Sell Prediction**](https://www.kaggle.com/datasets/anmolkumar/health-insurance-cross-sell-prediction?resource=download) créé par [**Anmol Kumar**](https://www.kaggle.com/anmolkumar).
+Cette base de données regroupe des informations sur `r nrow(data)` clients au travers de `r ncol(data)` variables, elle ne possède pas de données manquantes.
+Ces variables sont présentés dans le tableau suivant :
+
+```{r description_var}
+Description <- c(
+  "Le genre du client",
+  "L'age du client",
+  "Vaut 1 si le client a le permis de conduire, 0 sinon",
+  "Code de la région du client",
+  "Vaut 1 si le client a déjà une assurance auto, 0 sinon",
+  "L'age du véhicule",
+  "Vaut 1 si sa voiture a déjà été accidentée, 0 sinon",
+  "Ce que le client paye pour son assurance sur 1 an (en Roupie)",
+  "Code qui indique le canal de communication du client (ex:Mail, Telephone, en personne etc...)",
+  "Nombre de jours depuis la souscription de son premier contrat",
+  "Vaut 1 si le client est interessé pour prendre une assurance auto, 0 sinon"
+)
+
+Type <- c(
+  "factor",
+  "integer",
+  "factor",
+  "factor",
+  "factor",
+  "factor",
+  "factor",
+  "numeric",
+  "factor",
+  "numeric",
+  "factor"
+)
+
+data_for_table <- cbind(colnames(df), Type, Description) |> 
+  as.data.frame() |> 
+  setNames(c("Nom de la variable", "Type de la variable", "Description"))
+
+kable(data_for_table, "latex", booktabs = TRUE) %>% 
+  kable_styling(
+    full_width = TRUE, 
+    position = "center", 
+    font_size = 10, # Ajuster la taille de la police ici
+    latex_options = "HOLD_position",
+  ) |> 
+  column_spec(1, width = "4cm",
+              italic = TRUE,
+              bold = TRUE) |>  
+  column_spec(2, width = "3cm") |> 
+  column_spec(3, width = "8cm")
+```
+
+## Problèmes et solution {#Problème}
+
+L'un des premiers problèmes que nous avons rencontrez est le nombre d'observations dans la base de données.
+Avoir beaucoup d'information peut être un avantage, mais l'estimation de certains modèles peut prendre un certain temps et être très gourmand en puissance de calcul.
+
+Pour économiser du temps de calcul tout en restant performant, nous avons eu comme première idée de faire un échantillonnage de **`r nrow(df)`** individus en gardant la même proportions de **Response = 1** que dans la base de donnée d'origine, c'est à dire **`r round(sum(data$Response==1)/nrow(data)*100,2)` %**.
+
+Mais nous nous sommes vite confronté a un déséquilibre de classe, nos modèles avaient tendances à favoriser la classe majoritaire (dans notre cas, prédire majoritairement des 0)
+
+Pour palier a ce problème deux solutions se proposait à nous:
+
+-   Ajuster le seuil de classification, qui de est fixé à 0.5 par défaut. En le diminuant nous "forçons" les modèles à prédire plus de **Response = 1**. Mais cette méthode n'est pas toujours efficace et peut être très arbitraire.
+-   Augmenter la proportions de **Response = 1** dans notre échantillon pour que cette classe soit moins sous représenté.
+
+Etant donnée que nous disposons d'un nombre conséquent d'observations, nous avons alors choisit la deuxième options.
+Nous avons alors gardé l'idée de prendre un échantillon de **`r nrow(data)`** individus, mais cette fois-ci avec une proportion de **Response = 1** de **`r round(sum(df$Response==1)/nrow(df)*100,2)` %**
+
+# Analyse descriptive {#Analyse_descriptive}
+
+Avant de procéder à l'estimation des modèles, nous souhaitons introduire une section consacrée aux statistiques descriptive, portant sur les variables quantitatives et certaines variables qualitatives.
+
+## Variables qualitatives {#var_quali}
+
+```{r prop_genre, echo=FALSE}
+prop_genre <- df |> group_by(Gender) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Gender, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Gender) |> 
+  mutate(Proportion = Count / sum(Count))
+
+p1 <- ggplot(prop_genre, aes(x = Gender, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("#CDFF8D", "#FF9A88"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variable : Genre",
+       y = "Proportion",
+       fill = "Réponse") +
+  themeBG +
+  xlab(NULL) + theme(legend.position = "none")
+```
+
+```{r prop_ageVH, echo=FALSE}
+
+prop_ageVH <- df |> 
+  group_by(Vehicle_Age) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Vehicle_Age, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Vehicle_Age) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_ageVH$Vehicle_Age <- factor(prop_ageVH$Vehicle_Age, levels = c("> 2 Years", "1-2 Year", "< 1 Year"))
+
+p2 <- ggplot(prop_ageVH, aes(x = Vehicle_Age, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("#CDFF8D", "#FF9A88"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variable : Vehicle_Age",
+       y = "Proportion",
+       fill = "Réponse") +
+  themeBG +
+  xlab(NULL) + theme(legend.position = "none")
+```
+
+```{r prop_assures, echo=FALSE}
+prop_assures <- df |> 
+  group_by(Previously_Insured) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Previously_Insured, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Previously_Insured) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_assures$Previously_Insured <- ifelse(prop_assures$Previously_Insured==1,"Oui", "Non")
+
+
+p3 <- ggplot(prop_assures, aes(x = Previously_Insured, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("#CDFF8D", "#FF9A88"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variable : Previously_Insured",
+       y = "Proportion",
+       fill = "Réponse") +
+  themeBG +
+  xlab(NULL) + theme(legend.position = "bottom")
+```
+
+```{r prop_accident, echo=FALSE}
+prop_accident <- df |> 
+  group_by(Vehicle_Damage) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Vehicle_Damage, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Vehicle_Damage) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_accident$Vehicle_Damage <- ifelse(prop_accident$Vehicle_Damage==1,"Oui", "Non")
+
+
+p4 <- ggplot(prop_accident, aes(x = Vehicle_Damage, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("#CDFF8D", "#FF9A88"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variable : Vehicle_Damage",
+       y = "Proportion",
+       fill = "Réponse") +
+  themeBG +
+  xlab(NULL) + theme(legend.position = "none")
+
+```
+
+```{r}
+prop_genre_df <- as.data.frame(prop_genre)
+prop_accident_df <- as.data.frame(prop_accident)
+prop_assures_df <- as.data.frame(prop_assures)
+prop_ageVH_df <- as.data.frame(prop_ageVH)
+```
+
+```{r plot_prop}
+p1 + p2 + p3+ p4 + plot_layout(ncol = 2, nrow = 2, heights = 5) 
+```
+
+Nous pouvons observer plusieurs tendances parmi les clients de la compagnie d'assurance :
+
+-   La proportion de clients intéressés est un peu plus élevée chez les hommes que chez les femmes, bien que les chiffres soient assez proches (`r prop_genre_df[3,4] |> round(4) * 100` % pour les hommes contre `r prop_genre_df[1,4] |> round(4) * 100` % pour les femmes).
+-   Il semble que plus le véhicule du client est ancien, plus il y a de chance pour qu'il soit intéressé par l'assurance (`r prop_ageVH_df[1,4] |> round(4) * 100` % pour les véhicules de moins d'un an, contre `r prop_ageVH_df[3,4] |> round(4) * 100` % pour ceux de plus de deux ans).
+-   Les clients qui ont déjà une assurance véhicule ont tendance à ne pas être intéressés par cette nouvelle offre (`r prop_assures_df[4,4] |> round(4) * 100` %).
+-   Par ailleurs, une plus grande proportion de clients ayant déjà subi un sinistre sont intéressés par l'assurance (`r prop_accident_df[3,4] |> round(4) * 100` %), contrairement à ceux n'ayant pas eu de sinistre (`r prop_accident_df[1,4] |> round(4) * 100` %).
+
+\newpage
+
+## Variables quantitatives {#var_quanti}
+
+Les variables quantitatives de notre de base de données sont l'Age (en années), Annual_premium (montant de la prime payé chaque année en roupie) et Vintage (ancienneté de l'assuré en jours).
+
+```{r}
+df_quanti <- df %>% dplyr ::select(Age, Annual_Premium, Vintage)
+
+# Calculer les statistiques descriptives
+df_summary <- df_quanti |> 
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Values") |> 
+  group_by(Variable) |> 
+  summarise(
+    Minimum = round(min(Values, na.rm = TRUE),2),
+    Maximum = round(max(Values, na.rm = TRUE)),
+    Moyenne = round(mean(Values, na.rm = TRUE)),
+    Médiane = round(median(Values, na.rm = TRUE)),
+    Ecart_type = round(sd(Values, na.rm = TRUE)),
+  ) |> 
+  pivot_longer(cols = -Variable, names_to = " ", values_to = "Valeur") |> 
+  pivot_wider(names_from = Variable, values_from = Valeur)
+
+
+
+df_summary |> kable() |>  kable_styling(
+              full_width = TRUE,
+              font_size = 10,
+              position = "center", 
+              bootstrap_options = c("striped", "hover"),
+              latex_options = "hold_position"
+              ) |> row_spec(0, bold = TRUE, color = "#FF9A88")|> column_spec(1, bold = TRUE)
+
+```
+
+Les statistiques descriptives des quantitatives montrent que l'age des individus varie entre 20 et 85 ans avec une moyenne et une médiane similaire suggérant une distribution symétrique de l'âge parmi les individus.
+
+La prime moyenne payé fluctue énormément allant de 2 630 roupies à 540 165, il y a une grande disparité dans les montants payés par les différents clients.
+La moyenne vaut 30 951 roupies et la médiane est légèrement supérieur à 32 000 roupies.
+
+L’ancienneté, exprimée en jours, varie de 10 à 299 exprimant une variabilité relativement élevé.
+On note cependant que tout les clients de notre base de données ont souscrit leur contrat depuis moins d'un an.
+Ainsi, tout les clients sont récents.
+La moyenne et la médiane valent toute deux 154 jours.
+
+Les écarts types des quantitatives indiquent une dispersions relativement modéré autour de la moyenne.
+
+Pour avoir une première intuition des variables influentes, on décide de vérifier si les moyennes de chaque variable sont significativement différentes entre les individus intéressés à souscrire un contrat auto et les autres.
+
+```{r}
+moy.test.auto.var <- function(x, y,...){
+  var_value <- var.test(x,y)$p.value > 0.05
+  test <- t.test(x,y, var.equal = var_value)
+  output <- c(test$estimate, test$conf.int[1], test$conf.int[2], test$p.value)
+  names(output) <- c("µ_NI","µ_I","IC inf à 95%",
+                     "IC sup à 95%", "p-value")
+  return(output)
+}
+```
+
+```{r}
+test_moy_age <- as.data.frame(t(round(moy.test.auto.var(
+  df$Age[df$Response == "0"],
+  df$Age[df$Response == "1"]
+), 2)))
+colnames(test_moy_age) <- c("µ_NI", "µ_I", "IC inf à 95%", "IC sup à 95%", "p-value")
+
+test_moy_ap <- as.data.frame(t(round(moy.test.auto.var(
+  df$Annual_Premium[df$Response == "0"],
+  df$Annual_Premium[df$Response == "1"]
+), 2)))
+colnames(test_moy_ap) <- c("µ_NI", "µ_I", "IC inf à 95%", "IC sup à 95%", "p-value")
+
+test_moy_vintage <- as.data.frame(t(round(moy.test.auto.var(
+  df$Vintage[df$Response == "0"],
+  df$Vintage[df$Response == "1"]
+), 2)))
+colnames(test_moy_vintage) <- c("µ_NI", "µ_I", "IC inf à 95%", "IC sup à 95%", "p-value")
+
+# Combinaison des dataframes avec les noms de lignes spécifiés
+combined_table <- bind_rows(
+  test_moy_age %>% mutate(Variable = "AGE"),
+  test_moy_ap %>% mutate(Variable = "A_PREMIUM"),
+  test_moy_vintage %>% mutate(Variable = "VINTAGE")
+) %>% dplyr::select(Variable, everything())
+
+final_table <- combined_table %>% kable() |>  kable_styling(
+              full_width = TRUE,
+              font_size = 10,
+              position = "center", 
+              bootstrap_options = c("striped", "hover"),
+              latex_options = "hold_position"
+              ) |> row_spec(0, bold = TRUE, color = "#FF9A88") |> column_spec(1,bold = TRUE)
+final_table
+
+```
+
+L'âge moyen des individus non intéressés est inférieur (38,18) à celui des individus intéressés, qui est de 43,47.
+L'intervalle de confiance à 95 % n'inclut pas 0, et la p-value est proche de 0,00, indiquant une différence statistiquement significative entre les âges des individus intéressés et non intéressés.
+
+Les primes annuelles moyennes sont également différentes entre les groupes, les individus non intéressés payant légèrement moins en moyenne que ceux intéressés.
+Les IC pour cette comparaison n'incluent pas 0, et la p-value est proche de 0,00, montrant une différence très significative dans les primes entre les groupes.
+
+Les moyennes pour les individus non intéressés et intéressés sont très proches (153,59 contre 154,18), et les IC incluent 0.
+La p-value est de 0,27, ce qui n'est pas statistiquement significatif, suggérant que l'ancienneté ne diffère pas significativement entre ceux intéressés et ceux non intéressés par l'assurance véhicule.
+Un résultat peu étonnant quand on sait que tout les clients sont très récent (inférieur à un an).
+
+Hypothèses :
+
+-   L'âge pourrait être un facteur dans l'intérêt pour l'assurance véhicule, les individus plus âgés montrant plus d'intérêt.
+-   Des primes annuelles plus élevées pourraient être associées à une probabilité plus élevée d'intérêt pour des produits d'assurance supplémentaires.
+-   L'ancienneté d'un client peut ne pas être un bon prédicteur de leur intérêt pour souscrire à une assurance véhicule.
+
+# Présentation des modèles{#modeles}
+
+## Découpage train/test:
+
+```{r split_data, echo=FALSE}
+split <- initial_split(df, prop=2/3)
+df_train <- training(split)
+df_test <- testing(split)
+```
+
+Nous allons à présent aborder la présentation et l'analyse des modèles que nous avons pu entraîner et tester.
+Pour cela, nous avons divisé notre échantillon en deux parties : un ensemble d'entraînement, df_train, et un ensemble de test, df_test.
+Nous avons respecté la répartition classique, attribuant les deux tiers de l'échantillon à l'entraînement `r nrow(df_train)` observations) et le tiers restant au test `r nrow(df_test)` observations).
+
+Pour chaque modèle, nous allons d'abord présenter la matrice de confusion ainsi que les mesures de performances et ensuite nous commenterons les résultats
+
+Il existe plusieurs indicateurs qui nous permettent de déterminer si un modèle est performant ou non, en voici quelques un :
+
+$$
+\text{Sensibilité (Recall)} = \frac{TP}{TP + FN}
+$$
+
+$$
+\text{Spécificité} = \frac{TN}{TN + FP}
+$$
+
+$$
+\text{Précision} = \frac{TP}{TP + FP}
+$$
+
+$$
+\text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
+$$
+
+Pour affiner notre cible, nous devons porter une attention particulière à notre objectif de prédiction.
+
+Dans le cadre de notre étude, nous cherchons à identifier avec la plus grande exactitude les clients susceptibles de souscrire au nouveau contrat auto proposé par la compagnie d'assurance.
+
+L'accent est donc mis sur une juste prévision des vrais positifs -- autrement dit, nous aspirons à concevoir un modèle caractérisé par une forte sensibilité, minimisant ainsi le risque d'erreurs de type II.
+
+Cependant, se fier exclusivement à la sensibilité pourrait conduire au choix d'un modèle qui prédit systématiquement une réponse positive.
+
+Il est donc essentiel de considérer également la précision, un indicateur qui évalue la proportion de prédictions positives qui sont effectivement correctes.
+
+La spécificité, en revanche, sera reléguée au second plan, partant du principe qu'un faux positif -- soit la proposition d'un contrat à un client non intéressé -- n'engendre pas de conséquences désastreuses pour l'entreprise, du moins pas dans une mesure significative.
+
+En revanche, manquer de reconnaître un client potentiellement intéressé se traduirait par une occasion manquée, affectant directement le potentiel de croissance de la compagnie.
+
+Bien que la sensibilité et la précision soient nos critères principaux, l'accuracy reste un indicateur que nous surveillerons attentivement, car il reflète la proportion globale de prédictions correctes du modèle, tant pour les classes positives que négatives.
+
+
+\newpage
+## LDA{#LDA}
+
+La LDA, ou Analyse Discriminante Linéaire, est une technique statistique utilisée pour la classification et la réduction de dimensionnalité.
+Elle vise à séparer les différentes classes (ou groupes) en trouvant une combinaison linéaire des caractéristiques qui maximise la séparation entre les classes tout en minimisant la variation au sein de chaque classe.
+La LDA se distingue par sa facilité de compréhension et de mise en œuvre, faisant d'elle un modèle de base particulièrement efficient.
+Peu gourmande en ressources de calcul, elle présente l'avantage de ne pas nécessiter une optimisation préalable des paramètres.
+
+```{r LDA, echo=FALSE, , cache=TRUE}
+#Paralelle
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+lda_mod <- discrim_linear() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+
+df_recipe <- df_train |> recipe(Response~.) |>  
+  step_other(all_nominal(), -Response, other = "infrequent_combined") 
+  
+lda_wf <- workflow() |> 
+  add_model(lda_mod) |> 
+  add_recipe(df_recipe)
+
+lda_res <- last_fit(lda_wf, split=split) |> collect_predictions()
+
+# Fermer le cluster après l'utilisation
+stopImplicitCluster()
+```
+
+### Matrice de confusion
+
+```{r matrice_LDA, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(lda_res)
+```
+
+### Mesure des performances
+
+```{r, perf_LDA}
+matriceLDA <- lda_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceLDA_t <- matriceLDA$table |> t()
+
+tableau_perf(matriceLDA_t)
+```
+
+```{r ROC_LDA1, , cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_lda <- roc(lda_res, Response, .pred_1) 
+
+stopImplicitCluster()
+```
+
+Le modèle affiche une sensibilité élevée à `r Sensibilite(matriceLDA_t) |> round(2)` %, indiquant une forte capacité à détecter les vrais positifs. L'accuracy, qui mesure la justesse globale des prédictions, est raisonnable à `r Accuracy(matriceLDA_t) |> round(2)` %. La précision s'établit à `r Precision(matriceLDA_t) |> round(2)` %, suggérant que lorsque le modèle prédit un résultat positif, il est correct un peu plus de 6 fois sur 10. Collectivement, ces indicateurs montrent que le modèle est plutôt efficace pour identifier les cas positifs, tout en maintenant un niveau acceptable de prédictions correctes globales.
+
+
+\newpage
+## QDA{#QDA}
+
+La QDA, ou Analyse Discriminante Quadratique, est une méthode de classification statistique qui, contrairement à la LDA, prend en compte la covariance propre à chaque classe et utilise des séparateurs quadratiques plutôt que linéaires. Cela permet à la QDA de mieux s'adapter aux structures de données plus complexes où la relation entre les variables n'est pas nécessairement linéaire.
+LA QDA présente les même avantages que la LDA en terme de facilité de compréhension et de temps de calcul.
+
+```{r QDA, echo=FALSE, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+qda_mod <- discrim_quad() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+
+df_recipe_qda <- df_train |> recipe(Response~.) |> 
+  step_other(all_nominal(), -Response, other = "infrequent_combined") 
+  
+  
+qda_wf <- workflow() |> 
+  add_model(qda_mod) |> 
+  add_recipe(df_recipe_qda)
+
+qda_res <- last_fit(qda_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+### Matrice de confusion
+
+```{r, matrice_QDA, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(qda_res)
+```
+
+### Mesure des performances
+
+```{r perf_QDA}
+matriceQDA <- qda_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceQDA_t <- matriceQDA$table |> t()
+
+tableau_perf(matriceQDA_t)
+```
+
+```{r ROC_QDA1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_qda <- roc(qda_res$Response, qda_res$.pred_1)
+
+stopImplicitCluster()
+```
+
+Ce modèle présente une accuracy légèrement améliorée à `r Accuracy(matriceQDA_t) |> round(2)` %, comparé à `r Accuracy(matriceLDA_t) |> round(2)` % précédemment, suggérant une légère augmentation de la justesse globale des prédictions. La sensibilité diminue un peu, passant de `r Sensibilite(matriceLDA_t) |> round(2)` % à `r Sensibilite(matriceQDA_t) |> round(2)` %, ce qui indique une petite réduction dans la capacité du modèle à identifier tous les vrais positifs. La précision augmente de `r Precision(matriceLDA_t) |> round(2)` % à `r Precision(matriceQDA_t) |> round(2)` %, reflétant une meilleure exactitude des prédictions positives. En résumé, ce modèle montre une amélioration de l'accuracy et de la précision, tout en maintenant une sensibilité élevée, ce qui peut indiquer un équilibre légèrement meilleur entre les différents types d'erreurs par rapport au modèle précédent.
+
+\newpage
+## Logit{#Logit}
+
+Le modèle logistique, ou Logit, est une technique de régression utilisée pour prédire la probabilité d'appartenance à une catégorie ou classe binaire en fonction de l'une ou plusieurs variables indépendantes. Il modélise la relation entre les variables indépendantes et la log-odds de la variable dépendante, fournissant des coefficients qui représentent le changement logarithmique dans les odds pour une unité de changement dans les variables prédictives.
+Etant donné que la variable que nous chercons à prédire est binaire, nous avons trouvé pertinent d'estimer ce modèle dans notre étude.
+
+```{r Logit, logit_mod_wf, cache=TRUE}
+logit_mod <- logistic_reg() |>  
+  set_mode("classification") |> 
+  set_engine("glm")
+
+df_recipe <- df_train |> recipe(Response~.) |>  
+  step_other(all_nominal(), -Response, other = "infrequent_combined") |> 
+  step_dummy(all_nominal(), -Response, one_hot = TRUE)
+
+logit_wf <- workflow() |> 
+  add_model(logit_mod) |> 
+  add_recipe(df_recipe)
+
+logit_res <- last_fit(logit_wf, split=split) |> collect_predictions()
+```
+
+### Matrice de confusion :
+
+```{r, matrice_logit, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(logit_res)
+```
+
+### Mesure des perofrmances :
+
+```{r, pref_logit}
+matriceLOGIT <- logit_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceLOGIT_t <- matriceLOGIT$table |> t()
+
+tableau_perf(matriceLOGIT_t)
+```
+
+Pour ce modèle, l'accuracy est à `r Accuracy(matriceLOGIT_t) |> round(2)` %, se situant de façon comparable aux deux modèles précédents. La sensibilité est de `r Sensibilite(matriceLOGIT_t) |> round(2)` %, ce qui est légèrement inférieur aux résultats antérieurs. La précision est de `r Precision(matriceLOGIT_t) |> round(2)` %, montrant une légère amélioration par rapport au premier modèle mais pas par rapport au deuxième.
+
+Ainsi, tandis que la sensibilité est un peu réduite, la précision est légèrement meilleure dans ce modèle comparativement au premier, ce qui peut indiquer un équilibre différent entre les types d'erreurs.
+
+```{r, ROC_Logit1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_logit <- roc(logit_res$Response, logit_res$.pred_1)
+
+stopImplicitCluster()
+```
+
+\newpage
+## KNN{#KNN}
+
+Le modèle KNN, ou k-Nearest Neighbors (k-plus proches voisins), est une méthode de classification qui assigne une classe à une observation en se basant sur les classes des k observations les plus proches dans l'espace des caractéristiques. Il s'agit d'une méthode intuitive, basée sur la similarité des caractéristiques. 
+Avant d'appliquer le modèle KNN, il est crucial de déterminer la valeur optimale de k, c'est-à-dire le nombre de voisins les plus proches à considérer. Cette valeur sera choisie de manière à optimiser l'accuracy du modèle, assurant ainsi les meilleures prédictions possibles.
+
+```{r, KNN, cache=TRUE}
+knn_mod <- nearest_neighbor() |> 
+  set_mode("classification") |> 
+  set_engine("kknn") |> 
+  set_args(neighbors = tune())
+  
+df_recipe_num <- df_train |> recipe(Response~Age + Annual_Premium + Vintage)
+
+knn_wf <- workflow() |>
+  add_model(knn_mod) |> 
+  add_recipe(df_recipe_num)
+```
+
+### Optimisation des paramètres
+
+Nous avons utilisé une technique de validation croisée à 5 plis pour identifier les paramètres optimaux. La validation croisée est une méthode d'évaluation et de comparaison des modèles statistiques qui divise les données en un nombre prédéfini de 'plis' ou sous-ensembles. Le modèle est alors entraîné sur k-1 plis et testé sur le pli restant, et ce processus est répété  k fois, avec chaque pli utilisé une fois comme donnée de test. Ici, k vaut 5, signifiant que nous avons divisé nos données en 5 sous-ensembles distincts.
+
+```{r knn_cv1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+df_folds <- df_train |> 
+  vfold_cv(v = 5, strata = Response)
+
+knn_params <- knn_wf |> 
+  extract_parameter_set_dials() |> 
+  update(neighbors=neighbors(c(1,500)))
+
+knn_grid <- knn_params |> 
+  grid_regular(levels = 50)
+
+tic("knn tune")
+tune_res_knn <- tune_grid(
+  object = knn_wf, 
+  resamples = df_folds, 
+  grid = knn_grid)
+toc()
+
+stopImplicitCluster()
+
+```
+
+```{r, plot_KNN, , fig.width=5, fig.height=3, fig.align='center'}
+autoplot(tune_res_knn) + theme_minimal()
+```
+
+```{r, result_KNN, cache=TRUE}
+knn_best <- tune_res_knn |> select_best(metric = "accuracy")
+
+knn_final_wf <- knn_wf |>
+  finalize_workflow(knn_best)
+
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+knn_res <- last_fit(knn_final_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+Nous choisirons k = `r knn_best$neighbors` - plus proches voisins
+
+### Matrice de confusion
+
+```{r, matrice_KNN, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(knn_res)
+```
+\newpage
+### Mesure des performances
+
+```{r, perf_KNN}
+matriceKNN <- knn_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceKNN_t <- matriceKNN$table |> t()
+
+tableau_perf(matriceKNN_t)
+```
+
+```{r, ROC_KNN1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_knn <- roc(knn_res$Response, knn_res$.pred_1)
+
+stopImplicitCluster()
+```
+
+Pour le modèle KNN, l'accuracy s'établit à `r Accuracy(matriceKNN_t) |> round(2)` %, ce qui est inférieur aux performances observées avec les modèles précédents. La sensibilité, à `r Sensibilite(matriceKNN_t) |> round(2)` %, suggère également une baisse dans la capacité du modèle à détecter tous les vrais positifs. Quant à la précision, elle est de `r Precision(matriceKNN_t) |> round(2)` %, ce qui est moins élevé que ce que nous avons vu avec les autres modèles.
+
+En somme, comparé aux modèles LDA, QDA et Logit précédemment évalués, le modèle KNN semble présenter des performances moindres en termes d'accuracy, de sensibilité et de précision.
+
+\newpage
+
+## Decision tree {#DT}
+
+Le modèle Decision Tree est un algorithme qui sépare les données en branches pour aboutir à des décisions sous forme d'arbres. Partant d'un nœud racine, l'algorithme choisit la meilleure caractéristique pour diviser les données en sous-groupes plus homogènes. Cette opération est répétée récursivement pour chaque branche, formant un arbre jusqu'à ce que les feuilles (les nœuds terminaux) correspondent aux classes de classification.
+
+Parmi les paramètres que nous avons ajustés, il y a la complexité de coût (cost complexity). Ce paramètre pénalise la complexité de l'arbre pour prévenir le surajustement : plus la valeur de la complexité de coût est élevée, plus l'arbre de décision sera simple. 
+
+L'autre paramètre est la profondeur maximale de l'arbre, qui détermine combien de divisions (ou 'niveaux') l'arbre peut faire avant de s'arrêter. Limiter la profondeur peut aussi aider à éviter le surajustement en réduisant la complexité du modèle.
+Dans notre analyse, nous avons choisi la complexité de coût et la profondeur d'arbre qui maximisent l'accuracy, c'est-à-dire la proportion de prédictions correctes faites par le modèle sur les données de validation croisée.
+
+### Optimisation des paramètres
+
+```{r dt_recipe, cache=TRUE}
+df_recipe_mixt <- df_train |>  recipe(Response ~ ., data = df_train)|>
+  step_scale(all_numeric()) |>
+  step_center(all_numeric()) |>
+  step_dummy(all_nominal(), -all_outcomes())
+```
+
+```{r tree_mod, cache=TRUE}
+tree_mod <- decision_tree() |> 
+  set_engine("rpart") |>  
+  set_mode("classification") |> 
+  set_args(cost_complexity = tune(),
+           tree_depth = tune())
+```
+
+```{r tree_wf, cache=TRUE}
+tree_wf <- workflow() |>  
+  add_model(tree_mod) |> 
+  add_recipe(df_recipe_mixt)
+```
+
+```{r tree_cv, cache=TRUE}
+df_folds <- vfold_cv(df_train, v = 5, strata = Response)
+```
+
+```{r tree_tuning1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+tree_grid <- grid_regular(cost_complexity(range = c(-5,1)), tree_depth(), levels = 7)
+tic()
+tune_res_tree <- tune_grid(tree_wf,
+  resamples = df_folds,
+  grid = tree_grid,
+  metrics = metric_set(accuracy)
+)
+toc()
+stopImplicitCluster()
+```
+
+```{r, plot_dt, fig.width=5, fig.height=2, fig.align='center'}
+autoplot(tune_res_tree) + theme_minimal()
+```
+
+```{r tree_perf, cache=TRUE}
+tree_best <- tune_res_tree |> select_best(metric = "accuracy")
+```
+
+```{r tree_final, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+tree_final_wf <- tree_wf |>
+  finalize_workflow(tree_best)
+
+tree_res <- last_fit(tree_final_wf, split = split) |> collect_predictions()
+
+tree_fit <- tree_final_wf |> last_fit(split)
+
+cp_tree <- round(tree_best$cost_complexity,10)
+stopImplicitCluster()
+```
+
+L'arbre obtenu à un coût de compléxité de `r cp_tree` et une profondeur de `r tree_best$tree_depth`.
+
+### Arbre obtenu :
+
+```{r, tree, fig.width=5, fig.height=3.5, fig.align='center'}
+# Créer une palette de couleurs de l'orange au bleu
+red_to_green <- colorRampPalette(c("#CDFF8D", "#FF9A88"))(100)
+
+tree_fit |>  
+  extract_fit_engine() |>  prp(type = 0, extra = 104, 
+    roundint = FALSE,
+    box.palette = red_to_green,               
+    shadow.col = red_to_green,                  
+    split.font = 2,                       
+    split.round = 2,                      
+    cex = 0.3,                            
+    main = "Arbre de décision")          
+```
+
+### Matrice de confusion :
+
+```{r mat_conf_dt, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(tree_res)
+```
+
+### Mesure des performances
+
+```{r}
+matrice_dt <- tree_res |> conf_mat(estimate = .pred_class, truth = Response)
+matrice_dt_t <- matrice_dt$table |> t()
+
+tableau_perf(matrice_dt_t)
+```
+
+```{r, roc_dt1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_dt <- roc(tree_res$Response, tree_res$.pred_1)
+
+stopImplicitCluster()
+```
+
+Dans environ `r Accuracy(matrice_dt_t) |> round(2)` % des cas, l'arbre de décision a correctement prédit si un client était intéressé ou non par l'assurance véhicule donc se trompe dans `r Erreur_global(matrice_dt_t) |> round(2)` % des cas. La performance global du modèle est moyenne.  Cependant, La sensibilité est élevée, à `r Sensibilite(matrice_dt_t) |> round(2)` %. La précision est de `r Precision(matrice_dt_t) |> round(2)`, la meilleur précision pour l'instant parmi les modèles étudiés précédemment. Cela montre que l'arbre de décision est bon pour identifier les clients qui sont effectivement intéressés par une assurance véhicule. L’enjeux principal pour la compagnie d’assurance est de ne pas louper les clients potentiellement intéressé par un contrat auto. Proposer une offre a un client non intéresser comporte moins de risques. 
+
+\newpage
+
+## Random Forest{#RF}
+
+Le principe derrière une forêt aléatoire est qu'un ensemble d’arbre de décision peuvent ensemble former un modèle robuste et puissant.
+Les forêts aléatoires ajoutent de l'aléatoire à la construction de chaque arbre, ce qui les rend moins susceptibles au surajustement. Pendant la construction d'un arbre, au lieu de chercher le meilleur critère de séparation parmi toutes les caractéristiques, l'algorithme recherche le meilleur critère parmi un sous-ensemble aléatoire des caractéristiques. Cette méthode est appelée "bagging" (Bootstrap Aggregating), et elle est combinée avec une sélection aléatoire de caractéristiques pour améliorer la robustesse de la forêt.
+Pour notre modèle de forêt aléatoire, nous avons commencé par optimiser plusieurs paramètres importants, en utilisant une fois de plus la validation croisée à 5 plis pour évaluer la performance du modèle avec différents paramètres. Cela nous aide à généraliser mieux et à éviter le surajustement.
+
+
+### Optimisation des paramètres
+
+Les paramètres que nous avons optimisés sont :
+
+1. **mtry**: Le nombre de variables à considérer pour la séparation à chaque nœud. Un mtry élevé augmente la chance que les arbres soient similaire et peut conduire à un surajustement, tandis qu'un mtry trop faible peut conduire à des arbres faibles et donc à une forêt moins puissante. 
+2. **ntrees**: Le nombre d'arbres dans la forêt. Plus il y a d'arbres, plus les prédictions seront stables et précises, mais après un certain point, des gains supplémentaires seront marginaux, et cela augmentera les coûts de calcul.
+3. **min_n (Minimal Node Size)**: La taille minimale des nœuds terminaux. Une taille de nœud minimal plus grande peut lisser le modèle (moins de surajustement), tandis qu'une taille plus petite peut capturer davantage de détails dans les données, mais au risque de surajustement.
+
+
+```{r rf_mod_wf, cache=TRUE}
+rf_mod <- rand_forest() |> 
+  set_engine("ranger", importance = "impurity") |> 
+  set_mode("classification") |> 
+  set_args(mtry = tune(), trees = tune(), min_n=tune())
+
+rf_wf <- workflow() |>  
+  add_model(rf_mod) |> 
+  add_recipe(df_recipe_mixt)
+```
+
+```{r tuning_rf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+# Tuning du modèle
+tic()
+ranger_tune_res <- tune_grid(
+  rf_wf, 
+  resamples = df_folds, 
+  grid = crossing(mtry = c(3, 7, 9, 11), trees = c(100, 200, 500, 1000), min_n = c(5, 20, 30, 50)), 
+  metrics = metric_set(accuracy))
+toc()
+
+# Fermeture du cluster
+stopImplicitCluster()
+```
+
+```{r plot_rf, , fig.width=6, fig.height=4.5, fig.align='center'}
+autoplot(ranger_tune_res)  +
+  theme_minimal() 
+
+rf_best_r <- ranger_tune_res |> select_best(metric = "accuracy")
+```
+
+```{r rf_perf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+rf_final_wf_r <- rf_wf |>
+  finalize_workflow(rf_best_r)
+
+rf_res_r <- last_fit(rf_final_wf_r, split = split) |> collect_predictions()
+stopImplicitCluster()
+```
+
+Meilleurs hyperparamètres : **mtry** = `r rf_best_r$mtry` et **trees** = `r rf_best_r$trees` et **min_n** = `r rf_best_r$min_n`
+
+### Importance des variables 
+
+```{r imp_var_rf, cache=TRUE, fig.width=7, fig.height=3, fig.align='center'}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+rf_importance <- last_fit(rf_final_wf_r, split = split)
+
+extract_fit_parsnip(rf_importance$.workflow[[1]]) |>
+  vip(num_features = 10) +
+  ggtitle("Importance des variables") + theme_minimal()
+stopImplicitCluster()
+```
+
+L’importance des variables indique les variables ayant le plus d’impact sur les prédictions du modèle. Les deux variables les plus importantes sont, sans grande surprise, Previsously_insured_X1, qui indique que le client a déjà été assuré et Vehicle_damage_X1 qui indique quel ke véhicule du client a ja été accidenté. 
+
+### Matrice de confusion
+
+```{r mat_conf_rf, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(rf_res_r)
+```
+
+### Mesure des performances
+
+```{r}
+matrice_rf <- rf_res_r |> conf_mat(estimate = .pred_class, truth = Response)
+matrice_rf_t <- matrice_rf$table |> t()
+
+tableau_perf(matrice_rf_t)
+```
+
+La forêt aléatoire a prédit correctement l'intérêt des clients pour l'assurance véhicule dans environ `r Accuracy(matrice_rf_t) |> round(2)` % des cas. Comparativement à l'arbre de décision (`r Accuracy(matrice_dt_t) |> round(2)` %), l'exactitude est très faiblement améliorée. La sensibilité est de `r Sensibilite(matrice_rf_t) |> round(2)` %.  Bien que cette valeur soit un peu plus basse que celle de l'arbre de décision (`r Sensibilite(matrice_dt_t) |> round(2)` %), elle reste élevée.  La précision est de `r Precision(matrice_rf_t) |> round(2)`. La random forest est le modèle qui nous donne la meilleur précision. Cela indique que la forêt aléatoire est également un bon modèle pour identifier les clients réellement intéressés par l'assurance véhicule, essentiel pour la compagnie d'assurance.
+Notre Random forest n’est pas vraiment meilleur qu’un simple arbre de décision. 
+
+
+```{r, roc_rf1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_rf <- roc(rf_res_r$Response, rf_res_r$.pred_1)
+
+stopImplicitCluster()
+```
+
+\newpage
+
+## Boosting{#Boosting}
+
+Le Boosting est une méthode d'ensemble qui combine les prédictions de plusieurs modèles de base, souvent des arbres de décision, pour améliorer la robustesse et la précision des prédictions. Le principe est d'entraîner plusieurs modèles peu robustes les uns après les autres, en essayant à chaque fois de corriger les erreurs du modèle précédent, pour à la fin obtenir un seul et même modèle robuste. Il s'agit de l'un des modèles les plus récent et efficace, mais il a tendance à être gourmand en temps de calcul, notamment lors de l'optimisation de ses paramètres.
+
+### Optimisation des paramètres
+
+Les paramètres que nous avons optimisés sont :
+
+1. **n_tree** : Ce paramètre détermine le nombre total d'arbres de décision à construire dans le modèle de Boosting. Une valeur plus élevée peut améliorer la performance du modèle mais aussi augmenter le risque d'overfitting et le temps de calcul.
+
+2. **tree_depth** : Il s'agit de la profondeur maximale pour chaque arbre de décision. Une profondeur plus grande permet aux arbres de capturer des interactions plus complexes entre les variables, mais elle peut aussi conduire à de l'overfitting.
+
+3. **learning rate** : Ce paramètre contrôle la contribution de chaque nouvel arbre ajouté au modèle. Un taux d'apprentissage plus faible nécessite plus d'arbres pour construire le modèle final, mais peut améliorer la généralisation du modèle en évitant un apprentissage trop rapide qui pourrait ignorer les subtilités des données.
+
+```{r, Boosting, cache=TRUE}
+boost_mod <- boost_tree() |>  
+  set_engine("xgboost") |>  
+  set_mode("classification") |> 
+  set_args(trees = tune(), tree_depth = tune(), learn_rate = tune())
+
+df_recipe_boost <- df_train |> recipe(Response~.) |> 
+  step_other(all_nominal(), -Response, other = "infrequent_combined") |> 
+  step_dummy(all_nominal(), -Response, one_hot = TRUE)
+
+boost_wf <- workflow() |>  
+  add_model(boost_mod) |> 
+  add_recipe(df_recipe_boost)
+```
+
+```{r, boosting_cv1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+df_folds <- df_train |> 
+  vfold_cv(v = 5, strata = Response)
+
+boost_params <- boost_wf |> 
+  extract_parameter_set_dials() |>
+  update(
+    trees = trees(range = c(1,1500)),
+    tree_depth = tree_depth(range = c(1,20)),
+    learn_rate = learn_rate(range = c(-5,5)))
+
+boost_grid <- boost_params |> 
+  grid_regular(levels = 6)
+
+tic("boosting tune")
+tune_res_boost <- tune_grid(
+  boost_wf,
+  resamples = df_folds, 
+  grid = boost_grid,
+  metrics = metric_set(accuracy)
+  )
+toc()
+
+stopImplicitCluster()
+
+```
+
+```{r, plot_boost, fig.width=6, fig.height=4, fig.align='center'}
+autoplot(tune_res_boost) + theme_minimal()
+```
+
+```{r, boosting model, cache=TRUE}
+boost_best <- tune_res_boost |> select_best(metric = "accuracy")
+
+boost_final_wf <- boost_wf |>
+  finalize_workflow(boost_best)
+
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+boost_res <- last_fit(boost_final_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+Nous choisirons ntrees = `r boost_best$trees`, tree_depth = `r boost_best$tree_depth` et learning_rate = `r boost_best$learn_rate`
+
+### Matrice de confusion
+
+```{r mat_conf_boost, fig.width=5, fig.height=2, fig.align='center'}
+matrice_confusion(boost_res)
+```
+
+### Mesure des performances
+
+```{r perf_boost}
+matriceBOOST <- boost_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceBOOST_t <- matriceBOOST$table |> t()
+
+tableau_perf(matriceBOOST_t)
+```
+
+```{r roc_boost1, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_boost <- roc(boost_res$Response, boost_res$.pred_1)
+
+stopImplicitCluster()
+```
+
+### Mesure des performances 
+
+Le modèle Boosting présente une accuracy de  `r Accuracy(matriceBOOST_t) |> round(2)` %, ce qui le place entre les modèles Decision Tree et Random Forest pour cet indicateur. Pour la sensibilité, elle 
+de `r Sensibilite(matriceBOOST_t) |> round(2)` %, ce qui représente une légère diminution par rapport à Random Forest (`r Sensibilite(matrice_rf_t) |> round(2)` %) et plus significative par rapport au Decision Tree (`r Sensibilite(matrice_dt_t) |> round(2)` %).Et sur la Precision, elle est de `r Precision(matriceBOOST_t) |> round(2)` %, légèrement inférieure à Random Forest (`r Precision(matrice_rf_t) |> round(2)` %) mais supérieure à Decision Tree (`r Precision(matrice_dt_t) |> round(2)` %).
+
+En comparant ces résultats avec ceux des modèles précédents, le modèle Boosting offre une performance globale compétitive, avec une accuracy proche du meilleur modèle Random Forest. Toutefois, il présente une légère baisse en sensibilité, indiquant une petite concession dans la capacité à détecter tous les vrais positifs. La précision du modèle Boosting reste solide, bien qu'elle soit légèrement inférieure à celle de Random Forest, suggérant une qualité légèrement moindre dans la prédiction correcte des vrais positifs.
+
+\newpage
+
+# Comparaison des modèles{#comparer_modeles}
+
+## Courbe ROC{#ROC}
+
+```{r, courbe_roc}
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit,roc_knn, roc_dt, roc_rf,roc_boost),
+           couleur_roc = c("blue","red","orange", "purple", "pink","brown","green"),
+           nom_roc = c("LDA","QDA","Logit","KNN", "Arbre de décision", "Random Forest", "Boosting"))
+
+```
+
+
+```{r}
+auc <- c(LDA = roc_lda$auc,
+            QDA = roc_qda$auc,
+            LOGIT = roc_logit$auc,
+            KNN = roc_knn$auc,
+            Arbre_décision = roc_dt$auc,
+            random_forest = roc_rf$auc,
+            boosting = roc_boost$auc
+            )
+
+Air <- t(round(auc,3)) 
+Air <- as.data.frame(Air)
+
+              
+Air %>% 
+kable() %>%
+kable_styling(
+full_width = TRUE,
+font_size = 10,
+position = "center",
+latex_options = "HOLD_position",
+bootstrap_options = c("striped", "hover")
+) 
+```
+
+La courbe ROC (Receiver Operating Characteristic) est un outil graphique très utilisé pour évaluer la qualité des modèles prédictifs en classification binaire. Elle représente la sensibilité (taux de vrais positifs) en fonction de 1 - spécificité (taux de faux positifs) à différents seuils de décision. L'aire sous la courbe ROC (AUC - Area Under the Curve) permet de quantifier la performance globale du modèle : une AUC de 1 indique une performance parfaite, tandis qu'une AUC de 0,5 correspond à une performance non meilleure qu'un choix aléatoire.
+La courbe ROC est particulièrement utile parce qu'elle est indépendante du seuil de classification et donne un aperçu de la performance du modèle sur l'ensemble des seuils possibles.
+
+En comparant les courbes ROC des différents modèles,  il est évident que la plupart des modèles ont des performances relativement similaires, avec des AUC très proches les unes des autres, à l'exception des KNN qui semblent avoir une performance significativement plus basse.Nous pouvons observer que le modèle Random Forest est celui qui offre la meilleure performance, avec une AUC de `r roc_rf$auc |> round(3)` . Le modèle Boosting arrive en deuxième position, avec une AUC de `r roc_boost$auc |> round(3)` , suivi par le modèle DT avec une AUC de `r roc_dt$auc |> round(3)` . Les modèles LOGIT LDA, et QDA présentent des performances très légèrement inférieures, avec des AUC respectives de `r roc_logit$auc |> round(3)`, `r roc_lda$auc |> round(3)` et `r roc_qda$auc |> round(3)`. Le modèle KNN est le moins performant avec un AUC de `r roc_knn$auc |> round(3)`. 
+
+\newpage
+## F1_Socre{#f1_score}
+
+Pour sélectionner le modèle le plus adapté à nos besoins, il est important de trouver un équilibre entre deux aspects principaux :
+
+1. Bonne Précision : Un modèle qui prédit correctement les vrais positifs (TP - True Positives) tout en minimisant les faux positifs (FP - False Positives) est essentiel pour ne pas perdre de temps et de ressources à proposer des contrats d'assurance auto à des clients non intéressés.
+2. Bonne Sensibilité : Un modèle avec un faible taux d'erreurs de seconde espèce (faux négatifs, FN) est important pour ne pas omettre de prédire les clients réellement intéressés. Ne pas identifier ces clients peut entraîner une perte d'opportunités de vente.
+
+Le F1-score est une métrique qui aide à équilibrer la précision et la sensibilité (rappel), et sa formule est :
+
+$$
+F1\ Score= \frac{2 \times (\text{precision} \times \text{recall})}{\text{precision} + \text{recall}}
+$$
+
+```{r,comparaison modèle, cache=TRUE}
+f1_score <- function(res) {
+  matrice <-  res |> 
+    conf_mat(truth = Response, estimate = .pred_class)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+
+modèles <- c("LDA",
+             "QDA",
+             "LOGIT",
+             "KNN",
+             "Decision tree",
+             "Random Forest",
+             "Boosting")
+
+scores <- c(lda = f1_score(lda_res),
+            qda = f1_score(qda_res),
+            logit = f1_score(logit_res),
+            knn = f1_score(knn_res),
+            decision_tree = f1_score(tree_res),
+            random_forest = f1_score(rf_res_r),
+            boosting = f1_score(boost_res)
+            )
+
+modèles_f1_score <- paste0(round(scores, 2), " %")
+
+tab_f1_scores <- cbind(modèles, modèles_f1_score) |> as.data.frame()
+              
+colnames(tab_f1_scores)<- c("Modèles", "F1_score")
+
+tab_f1_scores %>% 
+t() %>%
+kable() %>%
+kable_styling(
+full_width = FALSE,
+font_size = 10,
+position = "center",
+latex_options = "HOLD_position",
+bootstrap_options = c("striped", "hover")
+) %>%
+column_spec(c(1, 2), color = "black")
+```
+
+En se basant sur le tableau des scores F1 pour les différents modèles : 
+
+  - Arbre de décision : Avec un F1-score de 75.62 %, l'arbre de décision offre une bonne balance entre précision et sensibilité. Les arbres de décision sont également faciles à comprendre et à expliquer, ce qui peut être rassurant et plus accessible pour le grand public. 
+  - Forêt aléatoire (Random Forest) : Avec un F1-score similaire de 75.45 %, la forêt aléatoire est également un bon choix. Elle offre l'avantage de la robustesse grâce à la combinaison de plusieurs arbres et est généralement plus performante en termes de gestion des erreurs et de la variance. Tout comme l'arbre de décision, la forêt aléatoire peut être visualisée et expliquée relativement facilement.
+
+Les deux modèles (arbre de décision et forêt aléatoire) présentent des F1-scores convenables et sont parmi les meilleurs modèles du tableau. Ils sont également parmi les plus interprétables, ce qui les rend adaptés pour une présentation ou une utilisation où la transparence et la compréhension du modèle sont importantes, notamment lorsqu'il s'agit de communiquer avec des non-experts. 
