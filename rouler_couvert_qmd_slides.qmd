@@ -422,7 +422,7 @@ p2 <- ggplot(prop_ageVH, aes(x = Vehicle_Age, y = Proportion, fill = Reponse)) +
   coord_flip()+
   scale_fill_manual(values = c("blue", "#CC5500"), 
                     labels = c("Intéressé", "Pas intéressé")) +
-  labs(title = "Variabe : Vehicle_Age",
+  labs(title = "Variable : Vehicle_Age",
        y = "Proportion",
        fill = "Réponse") +
   xlab(NULL) +
@@ -447,7 +447,7 @@ p3 <- ggplot(prop_assures, aes(x = Previously_Insured, y = Proportion, fill = Re
   coord_flip()+
   scale_fill_manual(values = c("blue", "#CC5500"), 
                     labels = c("Intéressé", "Pas intéressé")) +
-  labs(title = "Variabe : Previously_Insured",
+  labs(title = "Variable : Previously_Insured",
        y = "Proportion",
        fill = "Réponse") +
   xlab(NULL) +
@@ -472,7 +472,7 @@ p4 <- ggplot(prop_accident, aes(x = Vehicle_Damage, y = Proportion, fill = Repon
   coord_flip()+
   scale_fill_manual(values = c("blue", "#CC5500"), 
                     labels = c("Intéressé", "Pas intéressé")) +
-  labs(title = "Variabe : Vehicle_Damage",
+  labs(title = "Variable : Vehicle_Damage",
        y = "Proportion",
        fill = "Réponse") +
   xlab(NULL) +
