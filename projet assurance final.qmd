@@ -1,0 +1,1221 @@
+---
+title: "<span style='color: #CC5500; font-family: sans-serif;'>Rouler couvert</span>"
+author: "Paul Vidal & Gabin Sengel"
+fontsize: '35px'
+format: 
+  revealjs:
+    footer: "<em>--Data Mining--</em>"
+    logo: "logo_MECEN.jpeg"
+    theme : dark
+backgroundcolor: black
+slide-number: true
+scrollable: true
+transition: slide
+background-transition: slide
+incremental: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=TRUE,echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+```
+
+```{r, library}
+library(tidyverse)
+library(ranger)
+library(vip)
+library(tidymodels)
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(ISLR)
+library(e1071)
+library(DT)
+library(readr)
+library(missMDA)
+library(kableExtra)
+library(modelsummary)
+library(factoextra)
+library(FactoMineR)
+library(patchwork)
+library(doSNOW)
+library(recipes)
+library(discrim)
+library(installr)
+library(pROC)
+library(kernlab)
+library(yardstick)
+library(kernlab)
+library(rpart)
+library(tictoc)
+library(rpart.plot)
+library(kknn)
+library(xgboost)
+library(doParallel)
+library(ggdark)
+library(RColorBrewer)
+```
+
+```{r fonctions}
+themeBG <- theme(
+    plot.background = element_rect(fill = "black", color = "white"), # Définit le fond du panneau en noir
+    text = element_text(color = "white"), # Change la couleur du texte en blanc
+    axis.title = element_text(color = "white"), # Change la couleur des titres des axes en blanc
+    axis.title.y = element_text(color = "white", angle = 90, vjust = 0.5),
+    axis.text = element_text(color = "white"), # Change la couleur du texte des axes en blanc
+    strip.text = element_text(color = "white"),
+    plot.margin = margin(0.3,0.3,0.3,0.3, "cm")
+  )
+
+matrice_confusion <- function(x){
+  tab_model <- x |> conf_mat(estimate = .pred_class, truth = Response)
+  data_frame <- tab_model$table |> t() |> as.data.frame()
+  colnames(data_frame)<- c("Réalité", "Prédiction", "Observation")
+  
+plot <- data_frame |> 
+  ggplot(aes(Prédiction, Réalité, fill = Observation))+
+  geom_tile() +
+  geom_text(aes(label = Observation)) +
+  scale_fill_gradient(low = "purple", high = "#CC5500") +
+  labs(x = "Prédiction", y = "Réalité") + ggtitle("Matrice de confusion") +
+  theme_void() +
+  themeBG
+
+  plot
+}
+
+matrice_confusion_2.0 <- function(x){
+  tab_model <- x |> conf_mat(estimate = .pred_class_adjusted, truth = Response)
+  data_frame <- tab_model$table |> t() |> as.data.frame()
+  colnames(data_frame)<- c("Réalité", "Prédiction", "Observation")
+  
+plot <- data_frame |> 
+  ggplot(aes(Prédiction, Réalité, fill = Observation))+
+  geom_tile() +
+  geom_text(aes(label = Observation)) +
+  scale_fill_gradient(low = "purple", high = "#CC5500") +
+  labs(x = "Prédiction", y = "Réalité") + ggtitle("Matrice de confusion") +
+  theme_void() +
+  themeBG
+
+  plot
+}
+
+Accuracy<- function(matrice){
+  (matrice[1,1] + matrice[2,2])/ sum(matrice) * 100
+  
+}
+
+Erreur_1 <-function(matrice){
+  matrice[1,2]/sum(matrice[1,]) * 100
+  
+}
+
+Erreur_2 <- function(matrice){
+  matrice[2,1]/sum(matrice[2,]) * 100
+  
+}
+
+Specifite <- function(matrice){
+  matrice[1,1]/sum(matrice[1,]) * 100
+  
+}
+
+Sensibilite <-function(matrice){
+  matrice[2,2]/sum(matrice[2,]) * 100
+  
+}
+
+Precision <- function(matrice){
+  matrice[2,2] / (matrice[2,2] + matrice[1,2]) * 100
+  
+}
+
+Erreur_global <- function(matrice){
+  (matrice[1,2] + matrice[2,1])/ sum(matrice) * 100
+  
+}
+
+
+mesure_perf <- c("Accuracy",
+                 "Erreur global",
+                 "Spécificité",
+                 "Erreur Type 1",
+                 "Sensibilité",
+                 "Erreur Type 2",
+                 "Précision")
+
+tableau_perf <- function(x){
+             valeur_perf<-c(round(Accuracy(x),2),
+                            round(Erreur_global(x),2),
+                            round(Specifite(x),2),
+                            round(Erreur_1(x),2),
+                            round(Sensibilite(x),2),
+                            round(Erreur_2(x),2),
+                            round(Precision(x),2))
+
+              valeur_perf_str <- sapply(valeur_perf, function(x) paste0(x, " %"))
+
+              data_for_table <- cbind(mesure_perf, valeur_perf_str) |> as.data.frame()
+              
+              colnames(data_for_table)<- c("Indicateur", "Valeur")
+
+              data_for_table %>% 
+              kable() %>%
+              kable_styling(
+              full_width = FALSE,
+              font_size = 35,
+              position = "center", 
+              bootstrap_options = c("striped", "hover")
+              ) %>%
+              column_spec(c(1, 2), color = "white")
+}
+
+Courbe_ROC <- function(list_roc,couleur_roc,nom_roc){
+  ggroc(list_roc,alpha= 1) + ggtitle("ROC curve") + 
+  geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color="white", linetype="dashed")+
+  xlab("Spécificité") +
+  ylab("Sensibilité") +
+  scale_colour_manual(values = couleur_roc,labels = nom_roc) +
+  guides(colour = guide_legend(title = "Modèle"))+
+  theme_void() +
+  themeBG
+
+}
+
+calculer_precision <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  Precision(matrice_t)
+}
+
+calculer_sensi <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  Sensibilite(matrice_t)
+}
+
+calculer_f1_score <- function(res, seuil) {
+  matrice <-  res |> 
+    mutate(pred_class_at_seuil = if_else(.pred_1 > seuil, "1", "0"),
+           pred_class_at_seuil = factor(pred_class_at_seuil, levels = levels(Response))) |> 
+    conf_mat(truth = Response, estimate = pred_class_at_seuil)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+
+f1_score <- function(res) {
+  matrice <-  res |> 
+    conf_mat(truth = Response, estimate = .pred_class)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+```
+
+```{r, import_data}
+data <- read_csv("train.csv")
+```
+
+# <span style = 'color: #CC5500; font-family: sans-serif;'>Problématique : {#problématique background-image="photo_protection_voiture.webp" background-opacity="0.4" background-transition="zoom" data-transition="zoom"}
+
+Nous allons travailler sur une base de donnée regroupant des informations sur les clients d'une compagnie d'assurance qui vend des contrats "Santé"
+
+Notre objectif est de trouver le meilleur modèle permettant de prédire si un client qui possède déjà un contrat "Santé" est susceptible ou non de souscrire à un contrat "Automobile" auprès de la même compagnie
+
+# [Table des Matières :]{style="color: #CC5500; font-family: sans-serif;"}
+
+-   [Problématique](#problématique)
+-   [Base de données et analyse descriptive](#Base_et_analyse)
+-   [Présentation des modèles](#Présentation_des_modèles)
+-   [Comparaison des modèles](#Comparaison_des_modèles)
+
+# [Base de données et analyse descriptive :]{style="color: #CC5500; font-family: sans-serif;"} {#Base_et_analyse}
+
+```{r verif_NA, echo=FALSE, warning=FALSE, message=FALSE, eval =FALSE}
+sum(is.na(data))
+```
+
+```{r modif_variable}
+#changement de la variable Damage_Vehciule de character a factor 
+
+data$Vehicle_Damage <- ifelse(data$Vehicle_Damage == "Yes", 1, 0)
+
+#changement de la variable Gender
+
+data$Gender <- ifelse(data$Gender=="Male","Homme","Femme")
+
+# Modification des variables 
+
+data <- data[,-1]
+data <- data |>
+  mutate(
+    Gender = factor(Gender),
+    Age = as.integer(Age),
+    Vehicle_Age = factor(Vehicle_Age),
+    Driving_License = factor(Driving_License),
+    Region_Code = factor(Region_Code),
+    Previously_Insured = factor(Previously_Insured),
+    Vehicle_Damage = factor(Vehicle_Damage),
+    Policy_Sales_Channel = factor(Policy_Sales_Channel),
+    Response = factor(Response)
+  )
+```
+
+```{r echantiollonage 40%,}
+set.seed(1)
+# Définir la nouvelle proportion souhaitée pour Response = 1
+nouvelle_prop_response_1 <- 0.40
+
+# Calculer le nombre d'individus pour chaque valeur de Response basé sur la nouvelle proportion
+n_total <- 100000  # Nombre total d'individus souhaité
+
+# Nombre d'individus avec Response = 1 dans l'échantillon basé sur la nouvelle proportion
+n_response_1 <- round(n_total * nouvelle_prop_response_1)
+
+# Nombre d'individus avec Response = 0
+n_response_0 <- n_total - n_response_1
+
+# Séparer le dataframe par Response et échantillonner séparément
+df_sampled_1 <- data %>%
+  filter(Response == 1) %>%
+  sample_n(n_response_1)
+
+df_sampled_0 <- data %>%
+  filter(Response == 0) %>%
+  sample_n(n_response_0)
+
+# Combiner les deux échantillons
+df <- bind_rows(df_sampled_1, df_sampled_0)
+```
+
+::: {.incremental .smaller}
+-   **Données** :
+
+    -   [**Health Insurance Cross Sell Prediction**](https://www.kaggle.com/datasets/anmolkumar/health-insurance-cross-sell-prediction?resource=download)
+    -   `r nrow(data)` clients et `r ncol(data)` variables
+    -   Nombre d'individus trop élevé, on gardera uniquement `r nrow(df)` individus
+    -   Pas de données manquantes
+:::
+
+## [Description des variables :]{style="color: #CC5500;font-family: sans-serif;"}
+
+```{r description_var}
+Description <- c(
+  "Le genre du client",
+  "L'age du client",
+  "Vaut 1 si le client a le permis de conduire, 0 sinon",
+  "Code de la région du client",
+  "Vaut 1 si le client a déjà une assurance auto, 0 sinon",
+  "L'age du véhicule",
+  "Vaut 1 si sa voiture a déjà été accidentée, 0 sinon",
+  "Ce que le client paye pour son assurance sur 1 an (en Roupie)",
+  "Code qui indique le canal de communication du client (ex:Mail, Telephone, en personne etc...)",
+  "Nombre de jours depuis la souscription de son premier contrat",
+  "Vaut 1 si le client est interessé pour prendre une assurance auto, 0 sinon"
+)
+
+Type <- c(
+  "factor",
+  "integer",
+  "factor",
+  "factor",
+  "factor",
+  "factor",
+  "factor",
+  "numeric",
+  "factor",
+  "numeric",
+  "factor"
+)
+
+data_for_table <- cbind(colnames(df), Type, Description) |> 
+  as.data.frame() |> 
+  setNames(c("Nom de la variable", "Type de la variable", "Description"))
+
+data_for_table %>% 
+  kable() %>%
+  kable_styling(
+    full_width = FALSE,
+    font_size = 23,
+    position = "center", 
+    bootstrap_options = c("striped", "hover")
+  ) %>%
+  column_spec(c(1, 2, 3), color = "white")
+```
+
+# [Problèmes et solutions]{style="color: #CC5500; font-family: sans-serif;"}
+
+::: fragment
+-   [Première idée]{style="color: #CC5500"} :
+    -   Faire un échantillonage de [`r nrow(df)`]{style="color: #CC5500"} individus et garder la même proportions de [Response = 1]{style="color: #CC5500"} dans l'échantillon (`r round(sum(data$Response==1)/nrow(data)*100,2)` %)
+:::
+
+::: fragment
+-   [Problème]{style="color: #CC5500"} :
+    -   Déséquilibre de classe, les modèles auront tendances à favoriser la classe majoritaire, ici 0
+:::
+
+::: fragment
+-   [Solutions]{style="color: #CC5500"} :
+    -   Ajuster le seuil de classification
+    -   Augmenter la part de [Response = 1]{style="color: #CC5500"} dans l'échantillon
+:::
+
+## [Variables Qualitatives]{style="color: #CC5500; font-family: sans-serif;"}
+
+Nous observons la proportion de client intéressé ou non par un contrat auto parmi les modalités de quelques variables qualitative
+
+```{r prop_genre, echo=FALSE}
+prop_genre <- df |> group_by(Gender) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Gender, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Gender) |> 
+  mutate(Proportion = Count / sum(Count))
+
+p1 <- ggplot(prop_genre, aes(x = Gender, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("blue", "#CC5500"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variable : Genre",
+       y = "Proportion",
+       fill = "Réponse") +
+  xlab(NULL) +
+  theme_void() +
+  themeBG
+```
+
+```{r prop_ageVH, echo=FALSE}
+
+prop_ageVH <- df |> 
+  group_by(Vehicle_Age) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Vehicle_Age, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Vehicle_Age) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_ageVH$Vehicle_Age <- factor(prop_ageVH$Vehicle_Age, levels = c("> 2 Years", "1-2 Year", "< 1 Year"))
+
+p2 <- ggplot(prop_ageVH, aes(x = Vehicle_Age, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("blue", "#CC5500"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variabe : Vehicle_Age",
+       y = "Proportion",
+       fill = "Réponse") +
+  xlab(NULL) +
+  theme_void() +
+  themeBG
+```
+
+```{r prop_assures, echo=FALSE}
+prop_assures <- df |> 
+  group_by(Previously_Insured) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Previously_Insured, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Previously_Insured) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_assures$Previously_Insured <- ifelse(prop_assures$Previously_Insured==1,"Oui", "Non")
+
+
+p3 <- ggplot(prop_assures, aes(x = Previously_Insured, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("blue", "#CC5500"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variabe : Previously_Insured",
+       y = "Proportion",
+       fill = "Réponse") +
+  xlab(NULL) +
+  theme_void() +
+  themeBG
+```
+
+```{r prop_accident, echo=FALSE}
+prop_accident <- df |> 
+  group_by(Vehicle_Damage) |> 
+  summarise("Intéressé" = sum(Response == 1),
+            "Pas intéressé" = sum(Response == 0)) |> 
+  pivot_longer(-Vehicle_Damage, names_to = "Reponse", values_to = "Count") |> 
+  group_by(Vehicle_Damage) |> 
+  mutate(Proportion = Count / sum(Count))
+
+prop_accident$Vehicle_Damage <- ifelse(prop_accident$Vehicle_Damage==1,"Oui", "Non")
+
+
+p4 <- ggplot(prop_accident, aes(x = Vehicle_Damage, y = Proportion, fill = Reponse)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  coord_flip()+
+  scale_fill_manual(values = c("blue", "#CC5500"), 
+                    labels = c("Intéressé", "Pas intéressé")) +
+  labs(title = "Variabe : Vehicle_Damage",
+       y = "Proportion",
+       fill = "Réponse") +
+  xlab(NULL) +
+  theme_void() +
+  themeBG
+```
+
+```{r plot_prop}
+p1 + p2 + p3 + p4 + plot_layout(nrow = 2, ncol = 2)
+```
+
+## [Variables Quantitatives]{style="color: #CC5500; font-family: sans-serif;"}
+
+```{r}
+df_quanti <- df %>% dplyr ::select(Age, Annual_Premium, Vintage)
+
+# Calculer les statistiques descriptives
+df_summary <- df_quanti |> 
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Values") |> 
+  group_by(Variable) |> 
+  summarise(
+    Minimum = round(min(Values, na.rm = TRUE),2),
+    Maximum = round(max(Values, na.rm = TRUE)),
+    Moyenne = round(mean(Values, na.rm = TRUE)),
+    Médiane = round(median(Values, na.rm = TRUE)),
+    Ecart_type = round(sd(Values, na.rm = TRUE)),
+  ) |> 
+  pivot_longer(cols = -Variable, names_to = " ", values_to = "Valeur") |> 
+  pivot_wider(names_from = Variable, values_from = Valeur)
+
+
+
+df_summary |> kable() |>  kable_styling(
+              full_width = FALSE,
+              font_size = 40,
+              position = "center", 
+              bootstrap_options = c("striped", "hover")
+              ) |> row_spec(0, bold = TRUE, color = "#CC5500")|> column_spec(1 : ncol(df_summary), color = "white")
+
+```
+
+## [Variables Quantitatives :]{style="color: #CC5500;font-family: sans-serif;"}
+
+```{r}
+moy.test.auto.var <- function(x, y,...){
+  var_value <- var.test(x,y)$p.value > 0.05
+  test <- t.test(x,y, var.equal = var_value)
+  output <- c(test$estimate, test$conf.int[1], test$conf.int[2], test$p.value)
+  names(output) <- c("µ_NI","µ_I","IC inf à 95%",
+                     "IC sup à 95%", "p-value")
+  return(output)
+}
+```
+
+**Première intuitions** : On décide de regarder quelles variables quantitatives peuvent être potentiellement influentes. Les moyennes de chaque variables sont [**significativement différentes**]{style="color:#787878;"} entre les deux groupes pour [Age]{style="color: #CC5500;"} et [Annual_premium]{style="color: #CC5500;"}. Cependant, pour la variable [Vintage]{style="color: #CC5500;"}, la différence n'est [**pas significative**]{style="color:#787878;"}.
+
+::: columns
+::: {.column width="33%"}
+```{r mean_test_1, echo=FALSE}
+test_moy_age <- as.data.frame(round(moy.test.auto.var(
+  df$Age[df$Response == "0"],
+  df$Age[df$Response == "1"]
+  ),2))
+colnames(test_moy_age) <- "AGE"
+test_moy_age |> kable() |>  kable_styling(
+              full_width = FALSE,
+              font_size = 30,
+              position = "center",
+              ) |> row_spec(0, bold = TRUE, color = "#CC5500")|>
+  column_spec(c(1,2),color = "white")
+```
+:::
+
+::: {.column width="33%"}
+```{r mean_test_2, echo=FALSE}
+test_moy_ap <- round(moy.test.auto.var(
+  df$Annual_Premium[df$Response == "0"],
+  df$Annual_Premium[df$Response == "1"]
+  ),2) |> as.data.frame()
+colnames(test_moy_ap) <- "A_Premium"
+
+test_moy_ap |> kable() |>  kable_styling(
+              full_width = FALSE,
+              font_size = 28,
+              position = "center",
+              ) |> row_spec(0, bold = TRUE, color = "#CC5500")|>
+  column_spec(c(1,2),color = "white")
+```
+:::
+
+::: {.column width="33%"}
+```{r}
+test_moy_vintage <- round(moy.test.auto.var(
+  df$Vintage[df$Response == "0"],
+  df$Vintage[df$Response == "1"]
+  ),2) |> as.data.frame()
+colnames(test_moy_vintage) <- "Vintage"
+
+test_moy_vintage |> kable() |>  kable_styling(
+              full_width = FALSE,
+              font_size = 30,
+              position = "center",
+              ) |> row_spec(0, bold = TRUE, color = "#CC5500")|>
+  column_spec(c(1,2),color = "white")
+
+```
+:::
+:::
+
+# [Présentation des modèles :]{style="color: #CC5500; font-family: sans-serif;"} {#Présentation_des_modèles}
+
+## [Découpage train/test:]{style="color: #CC5500;font-family: sans-serif;"}
+
+Pour le découpage, nous allons prendre une proportion de 2/3 pour train et 1/3 pour test. Pour faire simple nous allons utiliser la fonction [**initial_split**]{style="color: #CC5500;"} du package [**tidymodels**]{style="color: #CC5500;"}. Nous garderons ce même découpage pour tout les modèles.
+
+```{r split_data, echo=TRUE}
+split <- initial_split(df, prop=2/3)
+df_train <- training(split)
+df_test <- testing(split)
+```
+
+# [LDA]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r LDA, echo=FALSE, cache=TRUE}
+#Paralelle
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+lda_mod <- discrim_linear() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+
+df_recipe <- df_train |> recipe(Response~.) |>  
+  step_other(all_nominal(), -Response, other = "infrequent_combined") 
+  
+lda_wf <- workflow() |> 
+  add_model(lda_mod) |> 
+  add_recipe(df_recipe)
+
+lda_res <- last_fit(lda_wf, split=split) |> collect_predictions()
+
+# Fermer le cluster après l'utilisation
+stopImplicitCluster()
+```
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r matrice_LDA, cache=TRUE}
+matrice_confusion(lda_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, perf_LDA, cache=TRUE}
+matriceLDA <- lda_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceLDA_t <- matriceLDA$table |> t()
+
+tableau_perf(matriceLDA_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r ROC_LDA, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_lda <- roc(lda_res, Response, .pred_1) 
+
+Courbe_ROC(list_roc = list(roc_lda),couleur_roc = c("blue"), nom_roc = c("LDA 1"))
+
+roc_lda$auc
+
+stopImplicitCluster()
+```
+
+# [QDA]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r QDA, echo=FALSE, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+qda_mod <- discrim_quad() |> 
+  set_mode("classification") |> 
+  set_engine("MASS")
+
+df_recipe_qda <- df_train |> recipe(Response~.) |> 
+  step_other(all_nominal(), -Response, other = "infrequent_combined") 
+  
+  
+qda_wf <- workflow() |> 
+  add_model(qda_mod) |> 
+  add_recipe(df_recipe_qda)
+
+qda_res <- last_fit(qda_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, matrice_QDA, cache=TRUE}
+matrice_confusion(qda_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r perf_QDA, cache=TRUE}
+matriceQDA <- qda_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceQDA_t <- matriceQDA$table |> t()
+
+tableau_perf(matriceQDA_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r ROC_QDA, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_qda <- roc(qda_res$Response, qda_res$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda),couleur_roc = c("blue","red"), nom_roc = c("LDA","QDA"))
+
+roc_lda$auc
+
+stopImplicitCluster()
+```
+
+# [Logit]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r Logit, logit_mod_wf, cache=TRUE}
+logit_mod <- logistic_reg() |>  
+  set_mode("classification") |> 
+  set_engine("glm")
+
+df_recipe <- df_train |> recipe(Response~.) |>  
+  step_other(all_nominal(), -Response, other = "infrequent_combined") |> 
+  step_dummy(all_nominal(), -Response, one_hot = TRUE)
+
+logit_wf <- workflow() |> 
+  add_model(logit_mod) |> 
+  add_recipe(df_recipe)
+
+logit_res <- last_fit(logit_wf, split=split) |> collect_predictions()
+```
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, matrice_logit, cache=TRUE}
+matrice_confusion(logit_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, pref_logit, cache=TRUE}
+matriceLOGIT <- logit_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceLOGIT_t <- matriceLOGIT$table |> t()
+
+tableau_perf(matriceLOGIT_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, ROC_Logit, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_logit <- roc(logit_res$Response, logit_res$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit),couleur_roc = c("blue","red","orange"), nom_roc = c("LDA","QDA","Logit"))
+
+roc_logit$auc
+
+stopImplicitCluster()
+```
+
+# [KNN]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, KNN, cache=TRUE}
+knn_mod <- nearest_neighbor() |> 
+  set_mode("classification") |> 
+  set_engine("kknn") |> 
+  set_args(neighbors = tune())
+  
+df_recipe_num <- df_train |> recipe(Response~Age + Annual_Premium + Vintage)
+
+knn_wf <- workflow() |>
+  add_model(knn_mod) |> 
+  add_recipe(df_recipe_num)
+```
+
+## [Optimisation des paramètres]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r knn_cv, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+df_folds <- df_train |> 
+  vfold_cv(v = 5, strata = Response)
+
+knn_params <- knn_wf |> 
+  extract_parameter_set_dials() |> 
+  update(neighbors=neighbors(c(1,1500)))
+
+knn_grid <- knn_params |> 
+  grid_regular(levels = 50)
+
+tic("knn tune")
+tune_res_knn <- tune_grid(
+  object = knn_wf, 
+  resamples = df_folds, 
+  grid = knn_grid)
+toc()
+
+stopImplicitCluster()
+
+autoplot(tune_res_knn) + dark_mode(theme_minimal())
+```
+
+```{r, result_KNN, cache=TRUE}
+knn_best <- tune_res_knn |> select_best(metric = "accuracy")
+
+knn_final_wf <- knn_wf |>
+  finalize_workflow(knn_best)
+
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+knn_res <- last_fit(knn_final_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+Nous choisirons k = `r knn_best$neighbors` - plus proches voisins
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, matrice_KNN, cache=TRUE}
+matrice_confusion(knn_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, perf_KNN, cache=TRUE}
+matriceKNN <- knn_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceKNN_t <- matriceKNN$table |> t()
+
+tableau_perf(matriceKNN_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, ROC_KNN, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_knn <- roc(knn_res$Response, knn_res$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit,roc_knn),
+           couleur_roc = c("blue","red","orange", "purple"),
+           nom_roc = c("LDA","QDA","Logit","KNN"))
+
+roc_knn$auc
+
+stopImplicitCluster()
+```
+
+# [Decision tree]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+## [Optimisation des paramètres]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r dt_recipe, cache=TRUE}
+df_recipe_mixt <- df_train |>  recipe(Response ~ ., data = df_train)|>
+  step_scale(all_numeric()) |>
+  step_center(all_numeric()) |>
+  step_dummy(all_nominal(), -all_outcomes())
+```
+
+```{r tree_mod, cache=TRUE}
+tree_mod <- decision_tree() |> 
+  set_engine("rpart") |>  
+  set_mode("classification") |> 
+  set_args(cost_complexity = tune(),
+           tree_depth = tune())
+```
+
+```{r tree_wf, cache=TRUE}
+tree_wf <- workflow() |>  
+  add_model(tree_mod) |> 
+  add_recipe(df_recipe_mixt)
+```
+
+```{r tree_cv, cache=TRUE}
+df_folds <- vfold_cv(df_train, v = 5, strata = Response)
+```
+
+```{r tree_tuning, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+tree_grid <- grid_regular(cost_complexity(range = c(-5,1)), tree_depth(), levels = 7)
+tic()
+tune_res_tree <- tune_grid(tree_wf,
+  resamples = df_folds,
+  grid = tree_grid,
+  metrics = metric_set(accuracy)
+)
+toc()
+stopImplicitCluster()
+autoplot(tune_res_tree) + dark_mode(theme_minimal())
+```
+
+```{r tree_perf, cache=TRUE}
+tree_best <- tune_res_tree |> select_best(metric = "accuracy")
+```
+
+```{r tree_final, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+tree_final_wf <- tree_wf |>
+  finalize_workflow(tree_best)
+
+tree_res <- last_fit(tree_final_wf, split = split) |> collect_predictions()
+
+tree_fit <- tree_final_wf |> last_fit(split)
+
+cp_tree <- round(tree_best$cost_complexity,10)
+stopImplicitCluster()
+```
+
+L'arbre obtenu à un coût de compléxité de `r cp_tree` et une profondeur de `r tree_best$tree_depth`.
+
+## [Arbre obtenu]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r tree, cache=TRUE}
+# Créer une palette de couleurs de l'orange au bleu
+orange_to_blue <- colorRampPalette(c("#CC5500", "blue"))(100)
+
+tree_fit |>  
+  extract_fit_engine() |>  prp(type = 0, extra = 104, 
+    roundint = FALSE,
+    box.palette = orange_to_blue,               
+    shadow.col = orange_to_blue,                  
+    split.font = 2,                       
+    split.round = 2,                      
+    cex = 0.3,                            
+    main = "Arbre de décision")          
+```
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r mat_conf_dt, cache=TRUE}
+matrice_confusion(tree_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, cache=TRUE}
+matrice_dt <- tree_res |> conf_mat(estimate = .pred_class, truth = Response)
+matrice_dt_t <- matrice_dt$table |> t()
+
+tableau_perf(matrice_dt_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, roc_dt, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_dt <- roc(tree_res$Response, tree_res$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit,roc_knn, roc_dt),
+           couleur_roc = c("blue","red","orange", "purple", "pink"),
+           nom_roc = c("LDA","QDA","Logit","KNN", "Arbre de décision"))
+
+roc_dt$auc
+
+stopImplicitCluster()
+```
+
+# [Random forest]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+## [Optimisation des paramètres]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r rf_mod_wf, cache=TRUE}
+rf_mod <- rand_forest() |> 
+  set_engine("ranger", importance = "impurity") |> 
+  set_mode("classification") |> 
+  set_args(mtry = tune(), trees = tune(), min_n=tune())
+
+rf_wf <- workflow() |>  
+  add_model(rf_mod) |> 
+  add_recipe(df_recipe_mixt)
+```
+
+```{r tuning_rf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+# Tuning du modèle
+tic()
+ranger_tune_res <- tune_grid(
+  rf_wf, 
+  resamples = df_folds, 
+  grid = crossing(mtry = c(3, 7, 9, 11), trees = c(100, 200, 500, 1000), min_n = c(5, 20, 30, 50)), 
+  metrics = metric_set(accuracy))
+toc()
+
+# Fermeture du cluster
+stopImplicitCluster()
+```
+
+```{r plot_rf, cache=TRUE}
+autoplot(ranger_tune_res)  +
+  dark_mode(theme_minimal()) +
+  theme(legend.position = "accuracy")
+
+rf_best_r <- ranger_tune_res |> select_best(metric = "accuracy")
+```
+
+```{r rf_perf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+rf_final_wf_r <- rf_wf |>
+  finalize_workflow(rf_best_r)
+
+rf_res_r <- last_fit(rf_final_wf_r, split = split) |> collect_predictions()
+stopImplicitCluster()
+```
+
+Meilleurs hyperparamètres : **mtry** = `r rf_best_r$mtry` et **trees** = `r rf_best_r$trees` et **min_n** = `r rf_best_r$min_n`
+
+## [Importance des variables]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r imp_var_rf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+rf_importance <- last_fit(rf_final_wf_r, split = split)
+
+extract_fit_parsnip(rf_importance$.workflow[[1]]) |>
+  vip(num_features = 10) +
+  ggtitle("Importance des variables") + dark_mode(theme_minimal())
+stopImplicitCluster()
+```
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r mat_conf_rf, cache=TRUE}
+matrice_confusion(rf_res_r)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, cache=TRUE}
+matrice_rf <- rf_res_r |> conf_mat(estimate = .pred_class, truth = Response)
+matrice_rf_t <- matrice_rf$table |> t()
+
+tableau_perf(matrice_rf_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, roc_rf, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_rf <- roc(rf_res_r$Response, rf_res_r$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit,roc_knn, roc_dt, roc_rf),
+           couleur_roc = c("blue","red","orange", "purple", "pink","brown"),
+           nom_roc = c("LDA","QDA","Logit","KNN", "Arbre de décision", "Random Forest"))
+
+roc_rf$auc
+stopImplicitCluster()
+```
+
+# [Boosting]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+## [Optimisation des paramètres]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r, Boosting, cache=TRUE}
+boost_mod <- boost_tree() |>  
+  set_engine("xgboost") |>  
+  set_mode("classification") |> 
+  set_args(trees = tune(), tree_depth = tune(), learn_rate = tune())
+
+df_recipe_boost <- df_train |> recipe(Response~.) |> 
+  step_other(all_nominal(), -Response, other = "infrequent_combined") |> 
+  step_dummy(all_nominal(), -Response, one_hot = TRUE)
+
+boost_wf <- workflow() |>  
+  add_model(boost_mod) |> 
+  add_recipe(df_recipe_boost)
+```
+
+```{r, boosting_cv, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+df_folds <- df_train |> 
+  vfold_cv(v = 5, strata = Response)
+
+boost_params <- boost_wf |> 
+  extract_parameter_set_dials() |>
+  update(
+    trees = trees(range = c(1,1500)),
+    tree_depth = tree_depth(range = c(1,20)),
+    learn_rate = learn_rate(range = c(-5,5)))
+
+boost_grid <- boost_params |> 
+  grid_regular(levels = 6)
+
+tic("boosting tune")
+tune_res_boost <- tune_grid(
+  boost_wf,
+  resamples = df_folds, 
+  grid = boost_grid,
+  metrics = metric_set(accuracy)
+  )
+toc()
+
+stopImplicitCluster()
+
+autoplot(tune_res_boost) + dark_mode(theme_minimal())
+```
+
+```{r, boosting model, cache=TRUE}
+boost_best <- tune_res_boost |> select_best(metric = "accuracy")
+
+boost_final_wf <- boost_wf |>
+  finalize_workflow(boost_best)
+
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+boost_res <- last_fit(boost_final_wf, split=split) |> collect_predictions()
+
+stopImplicitCluster()
+```
+
+Nous choisirons ntrees = `r boost_best$trees`, tree_depth = `r boost_best$tree_depth` et learning_rate = `r boost_best$learn_rate`
+
+## [Matrice de confusion]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r mat_conf_boost, cache=TRUE}
+matrice_confusion(boost_res)
+```
+
+## [Mesure des performances]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r perf_boost, cache=TRUE}
+matriceBOOST <- boost_res |> conf_mat(estimate = .pred_class, truth = Response)
+matriceBOOST_t <- matriceBOOST$table |> t()
+
+tableau_perf(matriceBOOST_t)
+```
+
+## [Courbe ROC]{style="color: #CC5500;font-family: sans-serif;"} {.smaller}
+
+```{r roc_boost, cache=TRUE}
+n_cores <- parallel::detectCores(logical = TRUE)
+registerDoParallel(cores = n_cores - 1)
+
+roc_boost <- roc(boost_res$Response, boost_res$.pred_1)
+
+Courbe_ROC(list_roc = list(roc_lda,roc_qda,roc_logit,roc_knn, roc_dt, roc_rf,roc_boost),
+           couleur_roc = c("blue","red","orange", "purple", "pink","brown","green"),
+           nom_roc = c("LDA","QDA","Logit","KNN", "Arbre de décision", "Random Forest", "Boosting"))
+
+roc_boost$auc
+
+stopImplicitCluster()
+```
+
+# [Comparaison des modèles]{style="color: #CC5500; font-family: sans-serif; font-size: 65px;"} {#Comparaison_des_modèles}
+
+Nous cherchons un modèle qui possède :
+
+::: {.incremental .smaller}
+-   Une bonne [précision]{style="color: #CC5500"} :
+    -   C'est à dire un modèle qui prédit correctement les positifs (TP élevé et FP bas)
+    -   Pour éviter de perdre du temps à proposer des contrats "Auto" à des clients non intéressé $$ \text{Precision} = \frac{TP}{TP + FP} $$
+:::
+#
+
+
+-   Une bonne [sensibilité]{style="color: #CC5500"} :
+    -   C'est à dire un modèle avec une erreur de seconde espèce faible
+    -   Pour éviter de prédire "0" des clients intéressés, ce qui représente une perte $$ \text{Recall} = \frac{TP}{TP + FN} $$
+
+
+# 
+
+Une bonne métrique pour arbitrer entre les deux est le [F1_Score]{style="color: #CC5500"} $$ \text{F1-score} = \frac{2}{\frac{1}{\text{precision}} + \frac{1}{\text{recall}}} $$
+
+```{r,comparaison modèle, cache=TRUE}
+f1_score <- function(res) {
+  matrice <-  res |> 
+    conf_mat(truth = Response, estimate = .pred_class)
+
+  matrice_t <- matrice$table |> t()
+
+  2/((1/Precision(matrice_t))+(1/Sensibilite(matrice_t)))
+}
+
+modèles <- c("LDA",
+             "QDA",
+             "LOGIT",
+             "KNN",
+             "Decision tree",
+             "Random Forest",
+             "Boosting")
+
+scores <- c(lda = f1_score(lda_res),
+            qda = f1_score(qda_res),
+            logit = f1_score(logit_res),
+            knn = f1_score(knn_res),
+            decision_tree = f1_score(tree_res),
+            random_forest = f1_score(rf_res_r),
+            boosting = f1_score(boost_res)
+            )
+
+modèles_f1_score <- paste0(round(scores, 2), " %")
+
+tab_f1_scores <- cbind(modèles, modèles_f1_score) |> as.data.frame()
+              
+colnames(tab_f1_scores)<- c("Modèles", "F1_score")
+
+tab_f1_scores %>% 
+kable() %>%
+kable_styling(
+full_width = FALSE,
+font_size = 25,
+position = "center", 
+bootstrap_options = c("striped", "hover")
+) %>%
+column_spec(c(1, 2), color = "white")
+```
+
+#
+
+En comparant les F1-Scores, nous remarquons que Decision Tree, Random Forest et Boosting proposent des balances entre Sensibilité et de Précision relativement proches (environ 75%).
+
+De ce fait, si nous devions n'en sélectionner qu'un seul, nous choisirions le modèle Decision Tree, car les arbres de décision sont relativement faciles à comprendre et à expliquer, ce qui peut être rassurant et plus accessible pour le grand public.
+
+De plus, le modèle demande moins de ressource pour être optimisé et entrainé.
