@@ -18,7 +18,7 @@ La dernière variable représente l'intérêt potentiel d'un client pour un cont
 - index.html : Le fichier HTML du rendu fait avec Quarto, disponible au lien : https://gabsengel.github.io/Rouler_Couvert/
 - rouler_couvert_qmd_slides.qmd : Le code Quarto pour les slides.
 - Rouler_Couvert.pdf : Le rendu PDF du projet.
-- rouler_couvert_rmd-PDF.Rmd : Le code RMarkdown utilisé pour générer le PDF.
+- rouler_couvert_rmd_PDF.Rmd : Le code RMarkdown utilisé pour générer le PDF.
 
 ## Méthodologie
 
