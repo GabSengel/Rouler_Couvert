@@ -370,7 +370,7 @@ Notre objectif est de développer le modèle le plus efficace pour prédire la p
 
 Pour ce faire, nous disposons de la base de données [**Health Insurance Cross Sell Prediction**](https://www.kaggle.com/datasets/anmolkumar/health-insurance-cross-sell-prediction?resource=download) créé par [**Anmol Kumar**](https://www.kaggle.com/anmolkumar).
 Cette base de données regroupe des informations sur `r nrow(data)` clients au travers de `r ncol(data)` variables, elle ne possède pas de données manquantes.
-Ces variables sont présentés dans le tableau suivant :
+Ces variables sont présentées dans le tableau suivant :
 
 ```{r description_var}
 Description <- c(
@@ -421,19 +421,19 @@ kable(data_for_table, "latex", booktabs = TRUE) %>%
 
 ## Problèmes et solution {#Problème}
 
-L'un des premiers problèmes que nous avons rencontrez est le nombre d'observations dans la base de données.
+L’un des premiers problèmes que nous avons rencontrés est le nombre d’observations dans la base de données.
 Avoir beaucoup d'information peut être un avantage, mais l'estimation de certains modèles peut prendre un certain temps et être très gourmand en puissance de calcul.
 
 Pour économiser du temps de calcul tout en restant performant, nous avons eu comme première idée de faire un échantillonnage de **`r nrow(df)`** individus en gardant la même proportions de **Response = 1** que dans la base de donnée d'origine, c'est à dire **`r round(sum(data$Response==1)/nrow(data)*100,2)` %**.
 
 Mais nous nous sommes vite confronté a un déséquilibre de classe, nos modèles avaient tendances à favoriser la classe majoritaire (dans notre cas, prédire majoritairement des 0)
 
-Pour palier a ce problème deux solutions se proposait à nous:
+Pour pallier à ce problème, deux solutions se proposaient à nous :
 
 -   Ajuster le seuil de classification, qui de est fixé à 0.5 par défaut. En le diminuant nous "forçons" les modèles à prédire plus de **Response = 1**. Mais cette méthode n'est pas toujours efficace et peut être très arbitraire.
 -   Augmenter la proportions de **Response = 1** dans notre échantillon pour que cette classe soit moins sous représenté.
 
-Etant donnée que nous disposons d'un nombre conséquent d'observations, nous avons alors choisit la deuxième options.
+Étant donné que nous disposons d’un nombre conséquent d’observations, nous avons alors choisi la deuxième option.
 Nous avons alors gardé l'idée de prendre un échantillon de **`r nrow(data)`** individus, mais cette fois-ci avec une proportion de **Response = 1** de **`r round(sum(df$Response==1)/nrow(df)*100,2)` %**
 
 # Analyse descriptive {#Analyse_descriptive}
@@ -588,17 +588,17 @@ df_summary |> kable() |>  kable_styling(
 
 ```
 
-Les statistiques descriptives des quantitatives montrent que l'age des individus varie entre 20 et 85 ans avec une moyenne et une médiane similaire suggérant une distribution symétrique de l'âge parmi les individus.
+Les statistiques descriptives des variables quantitatives montrent que l’âge des individus varie entre 20 et 85 ans avec une moyenne et une médiane similaire suggérant une distribution symétrique de l'âge parmi les individus.
 
 La prime moyenne payé fluctue énormément allant de 2 630 roupies à 540 165, il y a une grande disparité dans les montants payés par les différents clients.
 La moyenne vaut 30 951 roupies et la médiane est légèrement supérieur à 32 000 roupies.
 
 L’ancienneté, exprimée en jours, varie de 10 à 299 exprimant une variabilité relativement élevé.
 On note cependant que tout les clients de notre base de données ont souscrit leur contrat depuis moins d'un an.
-Ainsi, tout les clients sont récents.
+Ainsi, tous les clients sont récents.
 La moyenne et la médiane valent toute deux 154 jours.
 
-Les écarts types des quantitatives indiquent une dispersions relativement modéré autour de la moyenne.
+Les écarts-types des variables quantitatives indiquent une dispersions relativement modéré autour de la moyenne.
 
 Pour avoir une première intuition des variables influentes, on décide de vérifier si les moyennes de chaque variable sont significativement différentes entre les individus intéressés à souscrire un contrat auto et les autres.
 
@@ -849,13 +849,13 @@ logit_wf <- workflow() |>
 logit_res <- last_fit(logit_wf, split=split) |> collect_predictions()
 ```
 
-### Matrice de confusion :
+### Matrice de confusion
 
 ```{r, matrice_logit, fig.width=5, fig.height=2, fig.align='center'}
 matrice_confusion(logit_res)
 ```
 
-### Mesure des perofrmances :
+### Mesure des performances
 
 ```{r, pref_logit}
 matriceLOGIT <- logit_res |> conf_mat(estimate = .pred_class, truth = Response)
@@ -1049,7 +1049,7 @@ stopImplicitCluster()
 
 L'arbre obtenu à un coût de compléxité de `r cp_tree` et une profondeur de `r tree_best$tree_depth`.
 
-### Arbre obtenu :
+### Arbre obtenu
 
 ```{r, tree, fig.width=5, fig.height=3.5, fig.align='center'}
 # Créer une palette de couleurs de l'orange au bleu
@@ -1066,7 +1066,7 @@ tree_fit |>
     main = "Arbre de décision")          
 ```
 
-### Matrice de confusion :
+### Matrice de confusion
 
 ```{r mat_conf_dt, fig.width=5, fig.height=2, fig.align='center'}
 matrice_confusion(tree_res)
@@ -1097,7 +1097,7 @@ Dans environ `r Accuracy(matrice_dt_t) |> round(2)` % des cas, l'arbre de décis
 ## Random Forest{#RF}
 
 Le principe derrière une forêt aléatoire est qu'un ensemble d’arbre de décision peuvent ensemble former un modèle robuste et puissant.
-Les forêts aléatoires ajoutent de l'aléatoire à la construction de chaque arbre, ce qui les rend moins susceptibles au surajustement. Pendant la construction d'un arbre, au lieu de chercher le meilleur critère de séparation parmi toutes les caractéristiques, l'algorithme recherche le meilleur critère parmi un sous-ensemble aléatoire des caractéristiques. Cette méthode est appelée "bagging" (Bootstrap Aggregating), et elle est combinée avec une sélection aléatoire de caractéristiques pour améliorer la robustesse de la forêt.
+Les forêts aléatoires ajoutent de l’aléatoire à la construction de chaque arbre, ce qui les rend moins sujettes au surajustement. Pendant la construction d'un arbre, au lieu de chercher le meilleur critère de séparation parmi toutes les caractéristiques, l'algorithme recherche le meilleur critère parmi un sous-ensemble aléatoire des caractéristiques. Cette méthode est appelée "bagging" (Bootstrap Aggregating), et elle est combinée avec une sélection aléatoire de caractéristiques pour améliorer la robustesse de la forêt.
 Pour notre modèle de forêt aléatoire, nous avons commencé par optimiser plusieurs paramètres importants, en utilisant une fois de plus la validation croisée à 5 plis pour évaluer la performance du modèle avec différents paramètres. Cela nous aide à généraliser mieux et à éviter le surajustement.
 
 
@@ -1210,7 +1210,7 @@ Le Boosting est une méthode d'ensemble qui combine les prédictions de plusieur
 
 Les paramètres que nous avons optimisés sont :
 
-1. **n_tree** : Ce paramètre détermine le nombre total d'arbres de décision à construire dans le modèle de Boosting. Une valeur plus élevée peut améliorer la performance du modèle mais aussi augmenter le risque d'overfitting et le temps de calcul.
+1. **n_trees** : Ce paramètre détermine le nombre total d'arbres de décision à construire dans le modèle de Boosting. Une valeur plus élevée peut améliorer la performance du modèle mais aussi augmenter le risque d'overfitting et le temps de calcul.
 
 2. **tree_depth** : Il s'agit de la profondeur maximale pour chaque arbre de décision. Une profondeur plus grande permet aux arbres de capturer des interactions plus complexes entre les variables, mais elle peut aussi conduire à de l'overfitting.
 
@@ -1307,8 +1307,7 @@ stopImplicitCluster()
 
 ### Mesure des performances 
 
-Le modèle Boosting présente une accuracy de  `r Accuracy(matriceBOOST_t) |> round(2)` %, ce qui le place entre les modèles Decision Tree et Random Forest pour cet indicateur. Pour la sensibilité, elle 
-de `r Sensibilite(matriceBOOST_t) |> round(2)` %, ce qui représente une légère diminution par rapport à Random Forest (`r Sensibilite(matrice_rf_t) |> round(2)` %) et plus significative par rapport au Decision Tree (`r Sensibilite(matrice_dt_t) |> round(2)` %).Et sur la Precision, elle est de `r Precision(matriceBOOST_t) |> round(2)` %, légèrement inférieure à Random Forest (`r Precision(matrice_rf_t) |> round(2)` %) mais supérieure à Decision Tree (`r Precision(matrice_dt_t) |> round(2)` %).
+Le modèle Boosting présente une accuracy de  `r Accuracy(matriceBOOST_t) |> round(2)` %, ce qui le place entre les modèles Decision Tree et Random Forest pour cet indicateur. Pour la sensibilité, elle est de `r Sensibilite(matriceBOOST_t) |> round(2)` %, ce qui représente une légère diminution par rapport à Random Forest (`r Sensibilite(matrice_rf_t) |> round(2)` %) et plus significative par rapport au Decision Tree (`r Sensibilite(matrice_dt_t) |> round(2)` %).Et sur la Precision, elle est de `r Precision(matriceBOOST_t) |> round(2)` %, légèrement inférieure à Random Forest (`r Precision(matrice_rf_t) |> round(2)` %) mais supérieure à Decision Tree (`r Precision(matrice_dt_t) |> round(2)` %).
 
 En comparant ces résultats avec ceux des modèles précédents, le modèle Boosting offre une performance globale compétitive, avec une accuracy proche du meilleur modèle Random Forest. Toutefois, il présente une légère baisse en sensibilité, indiquant une petite concession dans la capacité à détecter tous les vrais positifs. La précision du modèle Boosting reste solide, bien qu'elle soit légèrement inférieure à celle de Random Forest, suggérant une qualité légèrement moindre dans la prédiction correcte des vrais positifs.
 
